@@ -1,0 +1,48 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  role      Role     @default(CLIENT)
+  client    ClientProfile?
+  createdAt DateTime @default(now())
+}
+
+enum Role {
+  ADMIN
+  CLIENT
+}
+
+model ClientProfile {
+  id             String        @id @default(uuid())
+  userId         String        @unique
+  user           User          @relation(fields: [userId], references: [id])
+  companyName    String
+  customKeywords String[]
+  reports        RadarReport[]
+}
+
+model RadarReport {
+  id               String       @id @default(uuid())
+  clientId         String
+  client           ClientProfile @relation(fields: [clientId], references: [id])
+  reportDate       DateTime     @default(now())
+  executiveSummary String       @db.Text
+  chinaInsights    Json         // Array of MarketInsight objects
+  russiaInsights   Json         // Array of MarketInsight objects
+  crisisAlerts     Json         // Array of SocialPost objects
+  status           ReportStatus @default(COMPLETED)
+}
+
+enum ReportStatus {
+  PROCESSING
+  COMPLETED
+  FAILED
+}
