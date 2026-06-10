@@ -8,3 +8,12 @@ build/
 .env
 .agent-reach/
 *.log
+
+# Next.js build output
+.next/
+node_modules/
+
+# Python Virtual Environments
+.venv/
+venv/
+env/
