@@ -379,9 +379,11 @@ async def run_exa_search_safe(
 
 
 def _parse_exa_json_output(output: str) -> List[Dict[str, Any]]:
-    """Robustly parse Exa MCP native JSON output."""
+    """Parse Exa MCP output — try native JSON first, fall back to text parsing."""
     if not output:
         return []
+
+    # Attempt 1: native JSON
     try:
         data = json.loads(output)
         results: List[Dict[str, Any]] = []
@@ -396,9 +398,56 @@ def _parse_exa_json_output(output: str) -> List[Dict[str, Any]]:
                 "score": item.get("score", 0),
             })
         return results
-    except json.JSONDecodeError:
-        logger.warning("Failed to parse Exa output as JSON.")
-        return []
+    except (json.JSONDecodeError, TypeError):
+        pass
+
+    # Attempt 2: text-block format (Title: / URL: / Highlights:)
+    logger.info("Exa output not JSON; parsing as text block.")
+    results: List[Dict[str, Any]] = []
+    blocks = re.split(r"\n---\n", output.strip())
+    for block in blocks:
+        if not block.strip():
+            continue
+        title = ""
+        url = ""
+        published = ""
+        author = ""
+        highlights = ""
+
+        lines = block.split("\n")
+        in_highlights = False
+        highlight_lines: List[str] = []
+
+        for line in lines:
+            if line.startswith("Title: "):
+                title = line[7:].strip()
+            elif line.startswith("URL: "):
+                url = line[5:].strip()
+            elif line.startswith("Published: "):
+                published = line[11:].strip()
+            elif line.startswith("Author: "):
+                author = line[8:].strip()
+            elif line.strip() == "Highlights:":
+                in_highlights = True
+            elif in_highlights:
+                cleaned = re.sub(r"\[\.\.\.\]", "", line).strip()
+                if cleaned:
+                    highlight_lines.append(cleaned)
+
+        highlights = " ".join(highlight_lines)
+        text_val = highlights[:600] if highlights else title
+
+        if title or highlights:
+            results.append({
+                "title": title,
+                "url": url,
+                "published": published,
+                "author": author if author and author != "N/A" else "Unknown",
+                "text": text_val,
+                "score": 0,
+            })
+
+    return results
 
 
 async def scan_xiaohongshu_market(
