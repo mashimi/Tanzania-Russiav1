@@ -116,22 +116,24 @@ cd Tanzania-Russiav1
 
 ### 2. Backend Setup
 
-The backend lives at `tz-radar-saas/backend/` (not a top-level `backend/` directory).
+**Important:** The backend code is inside `tz-radar-saas/backend/`, NOT at a top-level `backend/` folder. All commands below assume you are starting from the repository root (`Tanzania-Russiav1/`).
 
-```bash
-# Navigate to the backend folder
-cd tz-radar-saas/backend
+```powershell
+# Step 1 — Navigate to the backend folder
+cd tz-radar-saas\backend
 
-# Create and activate a virtual environment
+# Step 2 — Create a virtual environment inside the backend folder
 python -m venv .venv
 
+# Step 3 — Activate the virtual environment
 # Windows PowerShell:
 .\.venv\Scripts\Activate.ps1
 
 # Windows CMD:
 # .venv\Scripts\activate
 
-# Install dependencies into the virtual environment
+# After activation you should see "(.venv)" in your terminal prompt.
+# Step 4 — Install backend dependencies into this environment
 pip install -r requirements.txt
 ```
 
@@ -141,6 +143,8 @@ Create a `.env` file inside `tz-radar-saas/backend/`:
 # Optional: Enables AI-powered translation & summarization
 OPENAI_API_KEY=sk-your-openai-key
 ```
+
+> **Troubleshooting:** If you get `No module named uvicorn`, your venv is not activated or you installed packages in the wrong environment. Make sure `(.venv)` appears in your prompt before running `pip install -r requirements.txt`.
 
 ### 3. Frontend Setup
 
