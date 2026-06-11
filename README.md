@@ -111,19 +111,31 @@ The frontend polls `GET /api/v1/radar/{job_id}` every 3 seconds until the status
 
 ```bash
 git clone https://github.com/mashimi/Tanzania-Russiav1.git
-cd Tanzania-Russiav1/tz-radar-saas
+cd Tanzania-Russiav1
 ```
 
 ### 2. Backend Setup
 
+The backend lives at `tz-radar-saas/backend/` (not a top-level `backend/` directory).
+
 ```bash
-cd backend
-python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
+# Navigate to the backend folder
+cd tz-radar-saas/backend
+
+# Create and activate a virtual environment
+python -m venv .venv
+
+# Windows PowerShell:
+.\.venv\Scripts\Activate.ps1
+
+# Windows CMD:
+# .venv\Scripts\activate
+
+# Install dependencies into the virtual environment
 pip install -r requirements.txt
 ```
 
-Create a `.env` file in `backend/`:
+Create a `.env` file inside `tz-radar-saas/backend/`:
 
 ```env
 # Optional: Enables AI-powered translation & summarization
@@ -133,11 +145,13 @@ OPENAI_API_KEY=sk-your-openai-key
 ### 3. Frontend Setup
 
 ```bash
-cd ../frontend
+# From the repo root, navigate to frontend
+cd tz-radar-saas/frontend
+
 npm install
 ```
 
-Create a `.env.local` file in `frontend/`:
+Create a `.env.local` file inside `tz-radar-saas/frontend/`:
 
 ```env
 NEXT_PUBLIC_API_URL=http://localhost:8000
@@ -145,21 +159,24 @@ NEXT_PUBLIC_API_URL=http://localhost:8000
 
 ### 4. Start Both Services
 
-**Backend:**
+Make sure your virtual environment is activated before starting the backend.
+
+**Backend** (from `tz-radar-saas/backend/`):
 ```bash
-cd backend
+# Ensure venv is active, then:
 python -m uvicorn main:app --reload --port 8000
 ```
 
-**Frontend:**
+**Frontend** (from `tz-radar-saas/frontend/`):
 ```bash
-cd frontend
 npm run dev
 ```
 
 Visit `http://localhost:3000/dashboard` to see the dashboard.
 
-> **Note:** The scanner requires `mcporter` to be installed globally. Run `npm install -g mcporter` and configure Exa: `mcporter config add exa https://mcp.exa.ai/mcp`
+> **Note about the scanner:** The scanner requires `mcporter` to be installed globally. Run `npm install -g mcporter` and configure Exa: `mcporter config add exa https://mcp.exa.ai/mcp`
+
+> **Important:** The backend path is `tz-radar-saas/backend`, not `backend`. Running `cd backend` from the repo root will fail because the directory is nested inside `tz-radar-saas/`.
 
 ---
 
