@@ -1,0 +1,41 @@
+1. Fix Pylance FastAPI missing-import diagnostics
+- Specific goal/outcome: Resolve `reportMissingImports` diagnostics for `fastapi` and `fastapi.middleware.cors` in `tz-radar-saas/backend/main.py`.
+- Constraints or requirements:
+  - `tz-radar-saas/backend/requirements.txt` already declares `fastapi>=0.109.0`, so the backend code does not need import changes.
+  - FastAPI is installed for the discovered Python 3.10 interpreter at `C:\Users\Lenovo\AppData\Local\Programs\Python\Python310\python.exe`.
+  - Pylance was not resolving FastAPI because the workspace did not have an explicit Python interpreter configuration.
+- Expected behavior:
+  - Pylance uses Python 3.10 for the workspace and resolves `fastapi` and `fastapi.middleware.cors`.
+  - Pylance can also resolve local backend imports such as `models` and `scanner` via `tz-radar-saas/backend`.
+- Files to modify:
+  - `tz-radar-saas/backend/main.py`: no code changes required.
+  - `tz-radar-saas/backend/requirements.txt`: no dependency changes required.
+  - Added `.vscode/settings.json` with:
+    - `python.defaultInterpreterPath` pointing to Python 3.10.
+    - `python.analysis.extraPaths` including `tz-radar-saas/backend`.
+- Follow-up if diagnostics remain:
+  - In VS Code, run `Python: Select Interpreter` and choose `C:\Users\Lenovo\AppData\Local\Programs\Python\Python310\python.exe`.
+  - Reload the VS Code window.
+  - If a different interpreter is intentionally selected, install backend requirements into that interpreter with `python -m pip install -r tz-radar-saas/backend/requirements.txt`.
+
+2. Fix mcporter timeout blocking China scans
+- Specific goal/outcome: Prevent the China scan from returning empty results when `mcporter config list` times out or does not report Exa configuration.
+- Constraints or requirements:
+  - The previous scanner treated the `mcporter config list` preflight as fatal. If it failed, `scan_china_market()` returned `[]` before attempting `mcporter call`.
+  - Direct `mcporter call exa.web_search_exa(...)` can still work even when the config preflight is slow or incomplete.
+- Expected behavior:
+  - `_check_mcporter()` is cached and treated as a best-effort preflight only.
+  - China and Russia scans continue to attempt direct Exa searches even if the preflight fails.
+  - Individual Exa keyword searches use Windows `.cmd` shell execution and a 45-second timeout, so one slow keyword does not hang the whole scan.
+
+3. Upgrade keyword coverage with categorized matrices
+- Specific goal/outcome: Expand from 10 flat keywords per market to ~20+ keywords organized by category (tourism, investment, logistics, luxury).
+- Changes in `tz-radar-saas/backend/scanner.py`:
+  - Replaced `KEYWORDS_RU` and `KEYWORDS_CN` flat lists with `KEYWORD_MATRIX_RU` and `KEYWORD_MATRIX_CN` dicts.
+  - Added `get_all_keywords()` helper to flatten and deduplicate.
+  - Updated `scan_russia_market()` and `scan_china_market()` to use the matrix with `num_results=3` and `asyncio.sleep(0.3)`.
+- Verification:
+  - Python compile passed.
+  - Keyword counts: RU=19 keywords across 4 categories, CN=24 keywords across 4 categories.
+  - Backend health check: `{"status":"ok","service":"tz-radar-api","version":"2.0.0"}`.
+  - Frontend dashboard: `HTTP 200 OK`.
