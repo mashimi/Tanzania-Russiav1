@@ -1,18 +1,46 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { 
-  AlertTriangle, TrendingUp, ShieldCheck, Activity, 
-  Globe, Briefcase, Loader2, RefreshCw, CheckCircle2, XCircle 
+import { useState, useEffect, useCallback } from "react";
+import {
+  AlertTriangle, TrendingUp, TrendingDown, Minus,
+  ExternalLink, Flag, Archive,
+  MessageSquare, Search, Filter,
+  Globe, Briefcase, Activity, RefreshCw, XCircle,
+  Heart, Share2, Eye, Calendar, Clock,
+  CheckCircle2, UserCheck, Hash, Languages,
+  ChevronDown, ChevronUp, Loader2
 } from "lucide-react";
 
 // --- Types ---
+interface PostEngagement {
+  likes: number;
+  comments: number;
+  shares: number;
+  views: number;
+  total_score: number;
+}
+
 interface SocialPost {
+  id?: string;
   platform: string;
   author: string;
+  author_followers?: number;
+  is_influencer?: boolean;
   content_snippet: string;
-  engagement: number;
+  content_original?: string;
+  content_translated?: string;
+  url?: string;
+  published_at?: string;
+  engagement?: PostEngagement | number;
+  sentiment?: string;
   is_crisis: boolean;
+  topics?: string[];
+  language?: string;
+  screenshot_url?: string;
+  archived?: boolean;
+  flagged?: boolean;
+  action_taken?: string | null;
+  source_keyword?: string;
 }
 
 interface MarketInsight {
@@ -36,38 +64,43 @@ interface RadarReport {
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
-export default function DashboardPage() {
+export default function IntelligenceDashboard() {
   const [report, setReport] = useState<RadarReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
 
-  const runScan = async () => {
+  // Phase 2: Filters & Controls
+  const [timeRange, setTimeRange] = useState("all");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedPlatform, setSelectedPlatform] = useState("all");
+  const [showTranslation, setShowTranslation] = useState(false);
+  const [expandedPost, setExpandedPost] = useState<string | null>(null);
+
+  const runScan = useCallback(async () => {
     setLoading(true);
     setError(null);
     setReport(null);
-    
+
     try {
-      // 1. Trigger the scan
       const triggerRes = await fetch(`${API_URL}/api/v1/radar/trigger`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ client_id: "demo-client", custom_keywords: [] }),
       });
-      
+
       if (!triggerRes.ok) throw new Error("Failed to trigger scan");
-      
+
       const { job_id } = await triggerRes.json();
       setJobId(job_id);
 
-      // 2. Poll for results
       const poll = setInterval(async () => {
         try {
           const res = await fetch(`${API_URL}/api/v1/radar/${job_id}`);
           if (!res.ok) throw new Error("Failed to fetch report");
-          
+
           const data: RadarReport = await res.json();
-          
+
           if (data.status === "COMPLETED") {
             setReport(data);
             setLoading(false);
@@ -77,201 +110,414 @@ export default function DashboardPage() {
             setLoading(false);
             clearInterval(poll);
           }
-          // If PROCESSING, the interval continues
         } catch (err) {
           setError("Network error while polling. Is the backend running?");
           setLoading(false);
           clearInterval(poll);
         }
-      }, 3000); // Poll every 3 seconds
-
+      }, 3000);
     } catch (err: any) {
       setError(err.message || "An unexpected error occurred.");
       setLoading(false);
     }
-  };
+  }, []);
+
+  const handlePostAction = useCallback(async (actionType: string, post: SocialPost) => {
+    const postId = post.id || post.url;
+    if (!postId) return;
+
+    try {
+      await fetch(`${API_URL}/api/v1/posts/${encodeURIComponent(postId)}/action`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action_type: actionType }),
+      });
+    } catch (err) {
+      console.error(`Failed to ${actionType} post:`, err);
+    }
+  }, []);
+
+  // Collect all posts for search/filtering
+  const getAllPosts = useCallback((): SocialPost[] => {
+    if (!report) return [];
+    const posts: SocialPost[] = [];
+    for (const alert of report.crisisAlerts) posts.push(alert);
+    for (const insight of [...report.chinaInsights, ...report.russiaInsights]) {
+      posts.push(...insight.posts);
+    }
+    return posts;
+  }, [report]);
+
+  // Filtered posts based on search & platform
+  const filteredPosts = getAllPosts().filter((post) => {
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      const snippet = (post.content_snippet || "").toLowerCase();
+      const author = (post.author || "").toLowerCase();
+      if (!snippet.includes(q) && !author.includes(q)) return false;
+    }
+    if (selectedPlatform !== "all" && !post.platform.toLowerCase().includes(selectedPlatform.toLowerCase())) {
+      return false;
+    }
+    return true;
+  });
+
+  // Sort: crisis first, then by engagement
+  const sortedPosts = [...filteredPosts].sort((a, b) => {
+    if (a.is_crisis && !b.is_crisis) return -1;
+    if (!a.is_crisis && b.is_crisis) return 1;
+    const engA = typeof a.engagement === "number" ? a.engagement : (a.engagement as PostEngagement)?.total_score || 0;
+    const engB = typeof b.engagement === "number" ? b.engagement : (b.engagement as PostEngagement)?.total_score || 0;
+    return engB - engA;
+  });
 
   // Render States
   if (loading) return <SkeletonDashboard />;
   if (error) return <ErrorState message={error} onRetry={runScan} />;
   if (!report) return <EmptyState onScan={runScan} />;
 
+  const getCrisisPosts = () => sortedPosts.filter(p => p.is_crisis);
+  const getNormalPosts = () => sortedPosts.filter(p => !p.is_crisis);
+
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-50 p-6 space-y-8 max-w-7xl mx-auto">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-50">
       
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-slate-200 dark:border-slate-800 pb-6">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight flex items-center gap-3">
-            <Globe className="w-7 h-7 text-indigo-600 dark:text-indigo-400" />
-            Geopolitical Tourism Radar
-          </h1>
-          <p className="text-slate-500 dark:text-slate-400 text-sm mt-1.5">
-            Real-time market intelligence for China & Russia • Last updated:{" "}
-            {report.reportDate ? new Date(report.reportDate).toLocaleString() : "N/A"}
-          </p>
-        </div>
-        <button 
-          onClick={runScan}
-          className="bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white px-5 py-2.5 rounded-lg font-medium transition-all flex items-center gap-2 shadow-sm hover:shadow-md"
-        >
-          <RefreshCw className="w-4 h-4" /> Run New Scan
-        </button>
-      </div>
-
-      {/* Crisis Alert Banner */}
-      {report.crisisAlerts.length > 0 && (
-        <div className="bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-800 rounded-xl p-5 flex items-start gap-4 animate-in fade-in slide-in-from-top-2">
-          <div className="bg-rose-100 dark:bg-rose-900/50 p-2 rounded-full">
-            <AlertTriangle className="w-5 h-5 text-rose-600 dark:text-rose-400" />
+      {/* Sticky Top Bar */}
+      <div className="sticky top-0 z-10 bg-white/80 dark:bg-slate-950/80 backdrop-blur-md border-b border-slate-200 dark:border-slate-800">
+        <div className="max-w-7xl mx-auto px-6 py-4">
+          <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
+            <div>
+              <h1 className="text-xl font-bold tracking-tight flex items-center gap-2">
+                <Globe className="w-6 h-6 text-indigo-600 dark:text-indigo-400" />
+                Geopolitical Intelligence
+              </h1>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                {report.raw_post_count} posts collected &middot; Last scan: {report.reportDate ? new Date(report.reportDate).toLocaleString() : "N/A"}
+              </p>
+            </div>
+            <button
+              onClick={runScan}
+              className="bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white px-4 py-2 rounded-lg font-medium transition-all flex items-center gap-2 shadow-sm hover:shadow-md text-sm shrink-0"
+            >
+              <RefreshCw className="w-4 h-4" /> New Scan
+            </button>
           </div>
-          <div className="flex-1">
-            <h3 className="font-semibold text-rose-700 dark:text-rose-300 text-base">
-              Crisis Signals Detected
-            </h3>
-            <p className="text-sm text-rose-600/80 dark:text-rose-400/80 mt-1">
-              {report.crisisAlerts.length} high-priority alert(s) require immediate attention. Review the details below.
-            </p>
-          </div>
-        </div>
-      )}
 
-      {/* KPI Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <KPICard 
-          title="Posts Analyzed" 
-          value={report.raw_post_count.toLocaleString()} 
-          icon={Globe} 
-          color="blue" 
-        />
-        <KPICard 
-          title="Crisis Alerts" 
-          value={report.crisisAlerts.length.toString()} 
-          icon={AlertTriangle} 
-          color="rose" 
-        />
-        <KPICard 
-          title="China Insights" 
-          value={report.chinaInsights.length.toString()} 
-          icon={TrendingUp} 
-          color="emerald" 
-        />
-        <KPICard 
-          title="Russia Insights" 
-          value={report.russiaInsights.length.toString()} 
-          icon={ShieldCheck} 
-          color="indigo" 
-        />
-      </div>
+          {/* Phase 2: Search & Filter Controls */}
+          <div className="flex flex-wrap items-center gap-3 mt-4">
+            <div className="relative flex-1 min-w-[200px]">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              <input
+                type="text"
+                placeholder="Search posts, topics, authors..."
+                className="w-full pl-9 pr-4 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+            </div>
 
-      {/* Executive Summary */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 shadow-sm">
-        <h2 className="text-lg font-semibold mb-4 flex items-center gap-2 text-slate-800 dark:text-slate-100">
-          <Briefcase className="w-5 h-5 text-indigo-500" /> Executive Summary
-        </h2>
-        <div className="prose prose-slate dark:prose-invert max-w-none">
-          <p className="text-slate-600 dark:text-slate-300 leading-relaxed text-sm sm:text-base whitespace-pre-wrap">
-            {report.executiveSummary || "No summary available for this scan."}
-          </p>
-        </div>
-      </div>
+            <select
+              className="px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-sm"
+              value={selectedPlatform}
+              onChange={(e) => setSelectedPlatform(e.target.value)}
+            >
+              <option value="all">All Platforms</option>
+              <option value="xiao">XiaoHongShu</option>
+              <option value="exa">Exa</option>
+              <option value="ru">Russian Forums</option>
+              <option value="cn">Chinese Forums</option>
+            </select>
 
-      {/* Market Insights Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <MarketSection title="China Market" data={report.chinaInsights} icon={TrendingUp} color="emerald" />
-        <MarketSection title="Russia Market" data={report.russiaInsights} icon={ShieldCheck} color="indigo" />
-      </div>
-    </div>
-  );
-}
+            <button
+              onClick={() => setShowTranslation(!showTranslation)}
+              className={`px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors ${
+                showTranslation
+                  ? "bg-indigo-600 text-white"
+                  : "bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800"
+              }`}
+            >
+              <Languages className="w-4 h-4" />
+              {showTranslation ? "EN" : "中文"}
+            </button>
 
-// --- Sub-components for clean, modular code ---
-
-function KPICard({ title, value, icon: Icon, color }: { title: string, value: string, icon: any, color: string }) {
-  const colors: Record<string, string> = {
-    blue: "bg-blue-50 text-blue-600 dark:bg-blue-950/40 dark:text-blue-400 border-blue-100 dark:border-blue-900",
-    rose: "bg-rose-50 text-rose-600 dark:bg-rose-950/40 dark:text-rose-400 border-rose-100 dark:border-rose-900",
-    emerald: "bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400 border-emerald-100 dark:border-emerald-900",
-    indigo: "bg-indigo-50 text-indigo-600 dark:bg-indigo-950/40 dark:text-indigo-400 border-indigo-100 dark:border-indigo-900",
-  };
-
-  return (
-    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-sm flex items-center gap-4 transition-transform hover:-translate-y-0.5">
-      <div className={`p-3 rounded-lg border ${colors[color]}`}>
-        <Icon className="w-6 h-6" />
-      </div>
-      <div>
-        <p className="text-sm font-medium text-slate-500 dark:text-slate-400">{title}</p>
-        <p className="text-2xl font-bold text-slate-900 dark:text-slate-50 mt-0.5">{value}</p>
-      </div>
-    </div>
-  );
-}
-
-function MarketSection({ title, data, icon: Icon, color }: { title: string, data: MarketInsight[], icon: any, color: string }) {
-  const borderColor = color === "emerald" ? "border-emerald-500" : "border-indigo-500";
-  const badgeColor = color === "emerald" 
-    ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400"
-    : "bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-400";
-
-  return (
-    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 shadow-sm flex flex-col h-full">
-      <h2 className="text-lg font-semibold mb-5 flex items-center gap-2 text-slate-800 dark:text-slate-100">
-        <Icon className={`w-5 h-5 text-${color}-500`} /> {title}
-      </h2>
-      
-      {data && data.length > 0 ? (
-        <div className="space-y-5 flex-1">
-          {data.map((insight, idx) => (
-            <div key={idx} className={`border-l-2 ${borderColor} pl-4 py-1`}>
-              <p className="font-semibold text-slate-800 dark:text-slate-200 text-sm">{insight.trend}</p>
-              <p className="text-sm text-slate-500 dark:text-slate-400 mt-1.5 leading-relaxed">{insight.action}</p>
-              
-              <div className="flex items-center gap-3 mt-3">
-                <span className={`inline-block text-xs px-2.5 py-1 rounded-full font-medium ${badgeColor}`}>
-                  {insight.sentiment}
+            <div className="text-xs text-slate-500 dark:text-slate-400 ml-auto">
+              {sortedPosts.length} post{sortedPosts.length !== 1 ? 's' : ''}
+              {getCrisisPosts().length > 0 && (
+                <span className="text-rose-500 ml-1">
+                  &middot; {getCrisisPosts().length} crisis
                 </span>
-                {insight.posts.length > 0 && (
-                  <span className="text-xs text-slate-400 dark:text-slate-500">
-                    {insight.posts.length} source{insight.posts.length !== 1 ? 's' : ''}
-                  </span>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="max-w-7xl mx-auto px-6 py-6 space-y-6">
+        {/* Crisis Alerts - Priority Display */}
+        {getCrisisPosts().length > 0 && (
+          <div>
+            <h2 className="text-sm font-semibold text-rose-600 dark:text-rose-400 flex items-center gap-2 mb-3 uppercase tracking-wider">
+              <AlertTriangle className="w-4 h-4" />
+              Critical Alerts ({getCrisisPosts().length})
+            </h2>
+            <div className="space-y-3">
+              {getCrisisPosts().slice(0, 5).map((post, idx) => (
+                <CrisisAlertCard
+                  key={post.id || idx}
+                  post={post}
+                  expanded={expandedPost === (post.id || idx.toString())}
+                  onToggle={() => setExpandedPost(expandedPost === (post.id || idx.toString()) ? null : (post.id || idx.toString()))}
+                  onAction={(type) => handlePostAction(type, post)}
+                  showTranslation={showTranslation}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Post Feed */}
+        <div>
+          <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-2 mb-3 uppercase tracking-wider">
+            <Activity className="w-4 h-4" />
+            Intelligence Feed
+          </h2>
+          {getNormalPosts().length > 0 ? (
+            <div className="space-y-3">
+              {getNormalPosts().slice(0, 20).map((post, idx) => (
+                <IntelligencePostCard
+                  key={post.id || idx}
+                  post={post}
+                  expanded={expandedPost === (post.id || idx.toString())}
+                  onToggle={() => setExpandedPost(expandedPost === (post.id || idx.toString()) ? null : (post.id || idx.toString()))}
+                  onAction={(type) => handlePostAction(type, post)}
+                  showTranslation={showTranslation}
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="text-center py-12 text-slate-400 dark:text-slate-500">
+              <Activity className="w-8 h-8 mx-auto mb-2 opacity-50" />
+              <p className="text-sm">No posts matching your filters.</p>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// --- Post Card Components ---
+
+function CrisisAlertCard({
+  post, expanded, onToggle, onAction, showTranslation,
+}: {
+  post: SocialPost; expanded: boolean; onToggle: () => void; onAction: (type: string) => void; showTranslation: boolean;
+}) {
+  const eng = typeof post.engagement === "number" ? null : post.engagement as PostEngagement | undefined;
+
+  return (
+    <div className="bg-rose-50 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-900/50 rounded-xl overflow-hidden transition-shadow hover:shadow-md">
+      <div className="p-4 cursor-pointer" onClick={onToggle}>
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="bg-rose-100 dark:bg-rose-900/40 p-1.5 rounded-full shrink-0">
+              <AlertTriangle className="w-4 h-4 text-rose-600 dark:text-rose-400" />
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-semibold text-sm text-slate-900 dark:text-slate-100">{post.author}</span>
+                <span className="text-xs px-2 py-0.5 bg-rose-100 dark:bg-rose-900/40 text-rose-700 dark:text-rose-400 rounded-full font-medium">Crisis</span>
+                {post.is_influencer && (
+                  <span className="text-xs px-2 py-0.5 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 rounded-full font-medium">Influencer</span>
                 )}
               </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                {post.platform} {post.published_at ? `• ${new Date(post.published_at).toLocaleDateString()}` : ""}
+              </p>
             </div>
-          ))}
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            {post.url && (
+              <a href={post.url} target="_blank" rel="noopener noreferrer" className="p-1.5 hover:bg-rose-100 dark:hover:bg-rose-900/40 rounded-lg" onClick={(e) => e.stopPropagation()}>
+                <ExternalLink className="w-4 h-4 text-rose-500" />
+              </a>
+            )}
+            {expanded ? <ChevronUp className="w-4 h-4 text-rose-400" /> : <ChevronDown className="w-4 h-4 text-rose-400" />}
+          </div>
         </div>
-      ) : (
-        <div className="flex-1 flex flex-col items-center justify-center text-center py-8 text-slate-400 dark:text-slate-500">
-          <Activity className="w-8 h-8 mb-2 opacity-50" />
-          <p className="text-sm">No specific insights detected for this market yet.</p>
+
+        <p className="mt-2 text-sm text-slate-700 dark:text-slate-300 line-clamp-2">
+          {post.content_snippet}
+        </p>
+      </div>
+
+      {expanded && (
+        <div className="px-4 pb-4 border-t border-rose-200 dark:border-rose-900/50 pt-3">
+          {/* Topics */}
+          {post.topics && post.topics.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mb-3">
+              {post.topics.map((topic) => (
+                <span key={topic} className="px-2 py-0.5 text-xs bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-md">
+                  #{topic}
+                </span>
+              ))}
+            </div>
+          )}
+
+          {/* Engagement */}
+          {eng && (
+            <div className="flex items-center gap-4 mb-3 text-xs text-slate-500 dark:text-slate-400">
+              <span className="flex items-center gap-1"><Heart className="w-3.5 h-3.5" />{eng.likes.toLocaleString()}</span>
+              <span className="flex items-center gap-1"><MessageSquare className="w-3.5 h-3.5" />{eng.comments.toLocaleString()}</span>
+              <span className="flex items-center gap-1"><Share2 className="w-3.5 h-3.5" />{eng.shares.toLocaleString()}</span>
+              {eng.views > 0 && <span className="flex items-center gap-1"><Eye className="w-3.5 h-3.5" />{eng.views.toLocaleString()}</span>}
+            </div>
+          )}
+
+          {/* Action Buttons */}
+          <div className="flex gap-2">
+            <button onClick={() => onAction("respond")} className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors">
+              <MessageSquare className="w-3.5 h-3.5" /> Respond
+            </button>
+            <button onClick={() => onAction("flag")} className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-lg transition-colors">
+              <Flag className="w-3.5 h-3.5" /> Flag
+            </button>
+            <button onClick={() => onAction("archive")} className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-lg transition-colors">
+              <Archive className="w-3.5 h-3.5" /> Archive
+            </button>
+          </div>
         </div>
       )}
     </div>
   );
 }
+
+function IntelligencePostCard({
+  post, expanded, onToggle, onAction, showTranslation,
+}: {
+  post: SocialPost; expanded: boolean; onToggle: () => void; onAction: (type: string) => void; showTranslation: boolean;
+}) {
+  const eng = typeof post.engagement === "number" ? null : post.engagement as PostEngagement | undefined;
+  const sentimentColor =
+    post.sentiment === "positive" ? "text-emerald-600 bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-900" :
+    post.sentiment === "negative" ? "text-rose-600 bg-rose-50 dark:bg-rose-950/30 border-rose-200 dark:border-rose-900" :
+    "text-slate-600 bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700";
+
+  return (
+    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden transition-shadow hover:shadow-md">
+      <div className="p-4 cursor-pointer" onClick={onToggle}>
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <PlatformBadge platform={post.platform} />
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-semibold text-sm text-slate-900 dark:text-slate-100">{post.author}</span>
+                {post.is_influencer && (
+                  <span className="text-xs px-2 py-0.5 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 rounded-full font-medium flex items-center gap-1">
+                    <UserCheck className="w-3 h-3" /> Influencer
+                  </span>
+                )}
+                {post.language && post.language !== "unknown" && (
+                  <span className="text-xs text-slate-400 dark:text-slate-500 uppercase">{post.language}</span>
+                )}
+              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                {post.platform} {post.published_at ? `• ${new Date(post.published_at).toLocaleDateString()}` : ""}
+                {post.source_keyword && ` • "${post.source_keyword}"`}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${sentimentColor}`}>
+              {post.sentiment || "neutral"}
+            </span>
+            {post.url && (
+              <a href={post.url} target="_blank" rel="noopener noreferrer" className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg" onClick={(e) => e.stopPropagation()}>
+                <ExternalLink className="w-4 h-4 text-slate-400" />
+              </a>
+            )}
+            {expanded ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
+          </div>
+        </div>
+
+        <p className="mt-2 text-sm text-slate-700 dark:text-slate-300 line-clamp-2 leading-relaxed">
+          {post.content_snippet}
+        </p>
+      </div>
+
+      {expanded && (
+        <div className="px-4 pb-4 border-t border-slate-200 dark:border-slate-800 pt-3 space-y-3">
+          {/* Topics */}
+          {post.topics && post.topics.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {post.topics.map((topic) => (
+                <span key={topic} className="px-2 py-0.5 text-xs bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-md flex items-center gap-1">
+                  <Hash className="w-3 h-3" />{topic}
+                </span>
+              ))}
+            </div>
+          )}
+
+          {/* Engagement with Trend-like display */}
+          {eng && (
+            <div className="flex items-center gap-4 text-xs text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-800/50 p-2 rounded-lg">
+              <span className="flex items-center gap-1"><Heart className="w-3.5 h-3.5 text-rose-400" />{eng.likes.toLocaleString()}</span>
+              <span className="flex items-center gap-1"><MessageSquare className="w-3.5 h-3.5 text-blue-400" />{eng.comments.toLocaleString()}</span>
+              <span className="flex items-center gap-1"><Share2 className="w-3.5 h-3.5 text-emerald-400" />{eng.shares.toLocaleString()}</span>
+              {eng.views > 0 && <span className="flex items-center gap-1"><Eye className="w-3.5 h-3.5 text-indigo-400" />{eng.views.toLocaleString()}</span>}
+              <span className="ml-auto font-semibold text-indigo-600 dark:text-indigo-400">
+                Score: {eng.total_score.toFixed(0)}
+              </span>
+            </div>
+          )}
+
+          {/* Action Buttons */}
+          <div className="flex gap-2">
+            <button onClick={() => onAction("respond")} className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors">
+              <MessageSquare className="w-3.5 h-3.5" /> Respond
+            </button>
+            <button onClick={() => onAction("flag")} className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-lg transition-colors">
+              <Flag className="w-3.5 h-3.5" /> Flag
+            </button>
+            <button onClick={() => onAction("investigate")} className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-lg transition-colors">
+              <Search className="w-3.5 h-3.5" /> Investigate
+            </button>
+            <button onClick={() => onAction("archive")} className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-lg transition-colors">
+              <Archive className="w-3.5 h-3.5" /> Archive
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PlatformBadge({ platform }: { platform: string }) {
+  const colors: Record<string, string> = {
+    "XiaoHongShu": "bg-pink-100 text-pink-700 dark:bg-pink-900/40 dark:text-pink-400",
+    "Exa (CN)": "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-400",
+    "Exa (RU)": "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400",
+  };
+  const color = colors[platform] || "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300";
+
+  return (
+    <span className={`text-xs px-2 py-0.5 rounded-full font-medium shrink-0 ${color}`}>
+      {platform}
+    </span>
+  );
+}
+
+// --- Skeleton, Empty, Error States ---
 
 function SkeletonDashboard() {
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 p-6 space-y-8 max-w-7xl mx-auto animate-pulse">
-      <div className="flex justify-between items-center border-b border-slate-200 dark:border-slate-800 pb-6">
-        <div className="space-y-2">
-          <div className="h-8 bg-slate-200 dark:bg-slate-800 rounded w-64"></div>
-          <div className="h-4 bg-slate-200 dark:bg-slate-800 rounded w-96"></div>
-        </div>
-        <div className="h-10 bg-slate-200 dark:bg-slate-800 rounded-lg w-32"></div>
-      </div>
-      
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {[1, 2, 3, 4].map(i => (
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 p-6 max-w-7xl mx-auto animate-pulse">
+      <div className="space-y-4">
+        <div className="h-12 bg-slate-200 dark:bg-slate-800 rounded-xl w-full"></div>
+        <div className="h-10 bg-slate-200 dark:bg-slate-800 rounded-lg w-full"></div>
+        {[1, 2, 3].map(i => (
           <div key={i} className="h-24 bg-slate-200 dark:bg-slate-800 rounded-xl"></div>
         ))}
-      </div>
-      
-      <div className="h-40 bg-slate-200 dark:bg-slate-800 rounded-xl"></div>
-      
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="h-80 bg-slate-200 dark:bg-slate-800 rounded-xl"></div>
-        <div className="h-80 bg-slate-200 dark:bg-slate-800 rounded-xl"></div>
       </div>
     </div>
   );
@@ -287,7 +533,7 @@ function EmptyState({ onScan }: { onScan: () => void }) {
       <p className="text-slate-500 dark:text-slate-400 mb-8 leading-relaxed">
         Start your first geopolitical intelligence scan to monitor real-time sentiment, crisis signals, and investment trends across Chinese and Russian markets.
       </p>
-      <button 
+      <button
         onClick={onScan}
         className="bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white px-8 py-3.5 rounded-xl font-semibold transition-all flex items-center gap-2 shadow-lg hover:shadow-xl hover:-translate-y-0.5"
       >
@@ -297,7 +543,7 @@ function EmptyState({ onScan }: { onScan: () => void }) {
   );
 }
 
-function ErrorState({ message, onRetry }: { message: string, onRetry: () => void }) {
+function ErrorState({ message, onRetry }: { message: string; onRetry: () => void }) {
   return (
     <div className="min-h-[80vh] flex flex-col items-center justify-center text-center p-6 max-w-lg mx-auto">
       <div className="bg-rose-50 dark:bg-rose-950/30 p-5 rounded-full mb-6 ring-1 ring-rose-100 dark:ring-rose-900">
@@ -307,7 +553,7 @@ function ErrorState({ message, onRetry }: { message: string, onRetry: () => void
       <p className="text-slate-500 dark:text-slate-400 mb-8 leading-relaxed bg-rose-50 dark:bg-rose-950/20 p-4 rounded-lg border border-rose-100 dark:border-rose-900/50 text-sm">
         {message}
       </p>
-      <button 
+      <button
         onClick={onRetry}
         className="bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 px-6 py-3 rounded-lg font-medium transition-colors hover:bg-slate-800 dark:hover:bg-slate-200 flex items-center gap-2"
       >

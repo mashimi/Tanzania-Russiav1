@@ -33,6 +33,8 @@ reports_store: Dict[str, dict] = {}
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("🚀 TZ Tourism Radar API starting up (Enhanced Translation Engine)...")
+    # Phase 3: Initialize posts store
+    app.state.posts_store: Dict[str, dict] = {}
     yield
     logger.info("🛑 TZ Tourism Radar API shutting down...")
 
@@ -157,3 +159,115 @@ async def list_reports(client_id: Optional[str] = ""):
         ),
         "total": len(reports),
     }
+
+
+# ── Phase 3: Post Action, Search & Screenshot Endpoints ──
+
+@app.post("/api/v1/posts/{post_id}/action")
+async def handle_post_action(post_id: str, action: dict):
+    """Handle user actions on posts: respond, flag, investigate, archive."""
+    action_type = action.get("action_type", "")
+    if action_type not in ("respond", "flag", "investigate", "archive"):
+        raise HTTPException(status_code=400, detail="Invalid action_type. Use: respond, flag, investigate, archive")
+    
+    # Find post across all reports
+    found_post = None
+    for report in reports_store.values():
+        for alert in report.get("crisisAlerts", []):
+            if alert.get("id") == post_id:
+                found_post = alert
+                break
+        for insight_list in [report.get("chinaInsights", []), report.get("russiaInsights", [])]:
+            for insight in insight_list:
+                for post in insight.get("posts", []):
+                    if post.get("id") == post_id:
+                        found_post = post
+                        break
+    
+    if not found_post:
+        raise HTTPException(status_code=404, detail="Post not found")
+    
+    found_post["action_taken"] = action_type
+    found_post["action_taken_at"] = datetime.now(timezone.utc).isoformat()
+    
+    return {"status": "success", "action": action_type, "post_id": post_id}
+
+
+@app.get("/api/v1/posts/search")
+async def search_posts(
+    query: str = "",
+    time_range: str = "24h",
+    platform: str = "all",
+    min_engagement: int = 0,
+    page: int = 1,
+    limit: int = 20,
+):
+    """Search posts with filters across all stored reports."""
+    all_posts = []
+    for report in reports_store.values():
+        for alert in report.get("crisisAlerts", []):
+            all_posts.append(alert)
+        for insight_list in [report.get("chinaInsights", []), report.get("russiaInsights", [])]:
+            for insight in insight_list:
+                all_posts.extend(insight.get("posts", []))
+    
+    # Apply filters
+    filtered = all_posts
+    if query:
+        q = query.lower()
+        filtered = [p for p in filtered if q in p.get("content_snippet", "").lower() or q in p.get("author", "").lower()]
+    if platform != "all":
+        filtered = [p for p in filtered if platform.lower() in p.get("platform", "").lower()]
+    
+    # Sort by engagement desc
+    filtered.sort(key=lambda p: p.get("engagement", 0) if isinstance(p.get("engagement"), (int, float)) else 0, reverse=True)
+    
+    # Paginate
+    start = (page - 1) * limit
+    paginated = filtered[start:start + limit]
+    
+    return {
+        "posts": paginated,
+        "total": len(filtered),
+        "page": page,
+        "limit": limit,
+    }
+
+
+@app.post("/api/v1/posts/{post_id}/screenshot")
+async def capture_post_screenshot(post_id: str):
+    """Placeholder: Capture screenshot of a post URL."""
+    found_post = None
+    for report in reports_store.values():
+        for alert in report.get("crisisAlerts", []):
+            if alert.get("id") == post_id:
+                found_post = alert
+                break
+        for insight_list in [report.get("chinaInsights", []), report.get("russiaInsights", [])]:
+            for insight in insight_list:
+                for post in insight.get("posts", []):
+                    if post.get("id") == post_id:
+                        found_post = post
+                        break
+    
+    if not found_post:
+        raise HTTPException(status_code=404, detail="Post not found")
+    
+    # In production, use Playwright to capture screenshot
+    screenshot_url = f"https://screenshot.tz-radar.internal/{post_id}"
+    
+    return {"screenshot_url": found_post.get("screenshot_url", screenshot_url)}
+
+
+@app.get("/api/v1/posts/influencers")
+async def list_influencers(min_followers: int = 10000, limit: int = 10):
+    """List influencers detected across scans."""
+    influencers = []
+    seen_authors = set()
+    for report in reports_store.values():
+        for alert in report.get("crisisAlerts", []):
+            author = alert.get("author", "")
+            if author and author not in seen_authors:
+                seen_authors.add(author)
+                influencers.append(alert)
+    return {"influencers": influencers[:limit], "total": len(influencers)}

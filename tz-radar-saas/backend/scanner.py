@@ -16,6 +16,9 @@ import shutil
 import subprocess
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
+import uuid
+import math
+from collections import Counter
 
 from loguru import logger
 from openai import AsyncOpenAI
@@ -151,6 +154,117 @@ async def translate_to_english(text: str) -> str:
     except Exception as e:
         logger.warning(f"OpenAI translation failed: {e}")
         return text
+
+# -- Phase 1: Enhanced Post Metadata Helpers --
+SENTIMENT_KEYWORDS_POSITIVE = [
+    "отлично", "прекрасно", "рекомендую", "красиво", "безопасно", "удобно",
+    "нравится", "замечательно", "лучший", "хороший", "впечатляющий",
+    "很好", "不错", "推荐", "安全", "方便", "漂亮", "满意", "开心",
+    "amazing", "great", "excellent", "wonderful", "recommend",
+]
+SENTIMENT_KEYWORDS_NEGATIVE = [
+    "плохо", "ужасно", "опасно", "мошенники", "обман", "проблема", "сломался",
+    "дорого", "грязно", "отменили", "задержка",
+    "不好", "差", "骗子", "危险", "贵", "脏", "取消", "延迟", "差评",
+    "terrible", "awful", "dangerous", "scam", "problem", "avoid",
+]
+LANGUAGE_BLOCKS = {
+    "zh": r"[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]",
+    "ru": r"[\u0400-\u04ff]",
+    "en": r"[a-zA-Z]",
+}
+
+def calculate_engagement_score(raw_post: Dict[str, Any]) -> float:
+    likes = raw_post.get("liked_count", raw_post.get("score", 0))
+    comments = raw_post.get("comment_count", raw_post.get("score", 0) * 0.2)
+    shares = raw_post.get("share_count", 0)
+    views = raw_post.get("view_count", 0)
+    return float(likes + (comments * 2) + (shares * 3) + (views * 0.01))
+
+def detect_sentiment(text: str) -> str:
+    if not text:
+        return "neutral"
+    text_lower = text.lower()
+    pos_score = sum(1 for kw in SENTIMENT_KEYWORDS_POSITIVE if kw in text_lower)
+    neg_score = sum(1 for kw in SENTIMENT_KEYWORDS_NEGATIVE if kw in text_lower)
+    if pos_score > neg_score:
+        return "positive"
+    elif neg_score > pos_score:
+        return "negative"
+    return "neutral"
+
+def detect_language(text: str) -> str:
+    if not text:
+        return "unknown"
+    scores = {}
+    for lang, pattern in LANGUAGE_BLOCKS.items():
+        matches = len(re.findall(pattern, text))
+        if matches > 0:
+            scores[lang] = matches
+    if not scores:
+        return "unknown"
+    return max(scores, key=scores.get)
+
+TOPIC_KEYWORDS = {
+    "safari": ["сафари", "游猎", "safari", "serengeti", "серенгети", "塞伦盖蒂"],
+    "beach": ["пляж", "море", "海滩", "海", "beach", "ocean"],
+    "hotel": ["отель", "гостиница", "酒店", "hotel", "resort"],
+    "flight": ["рейс", "перелет", "航班", "flight", "direct"],
+    "visa": ["виза", "签证", "visa", "entry"],
+    "investment": ["инвестиции", "бизнес", "投资", "invest", "economic"],
+    "luxury": ["люкс", "роскош", "奢华", "luxury", "vip"],
+    "safety": ["безопасн", "опасн", "安全", "安全", "safety", "risk"],
+    "payment": ["оплата", "карта", "支付", "payment", "card"],
+    "logistics": ["транспорт", "логистик", "物流", "transport", "logistics"],
+}
+
+def extract_topics(text: str) -> List[str]:
+    if not text:
+        return []
+    text_lower = text.lower()
+    topics = []
+    for topic, keywords in TOPIC_KEYWORDS.items():
+        for kw in keywords:
+            if kw in text_lower:
+                topics.append(topic)
+                break
+    return topics[:5]
+
+async def collect_post_with_metadata(
+    raw_post: Dict[str, Any], platform: str, custom_keyword: str = ""
+) -> Dict[str, Any]:
+    """Collect full post data with engagement metrics and source info."""
+    text = raw_post.get("text", raw_post.get("content_snippet", ""))
+    title = raw_post.get("title", "")
+    full_text = f"{title}: {text}" if title else text
+    
+    engagement = {
+        "likes": int(raw_post.get("liked_count", raw_post.get("score", 0))),
+        "comments": int(raw_post.get("comment_count", 0)),
+        "shares": int(raw_post.get("share_count", 0)),
+        "views": int(raw_post.get("view_count", 0)),
+        "total_score": calculate_engagement_score(raw_post),
+    }
+    
+    follower_count = raw_post.get("follower_count", raw_post.get("author_followers", 0))
+    
+    return {
+        "id": raw_post.get("id", str(uuid.uuid4())),
+        "platform": platform,
+        "author": raw_post.get("author", "Unknown"),
+        "author_followers": follower_count,
+        "is_influencer": follower_count > 10000 or engagement["total_score"] > 500,
+        "content_snippet": full_text[:600],
+        "url": raw_post.get("url", ""),
+        "published_at": raw_post.get("published", raw_post.get("publishedDate", "")),
+        "engagement": engagement,
+        "sentiment": detect_sentiment(full_text),
+        "is_crisis": raw_post.get("is_crisis", False),
+        "topics": extract_topics(full_text),
+        "language": detect_language(full_text),
+        "source_keyword": custom_keyword,
+    }
+
 
 async def translate_insights(
     insights: List[Dict], crisis_alerts: List[Dict]

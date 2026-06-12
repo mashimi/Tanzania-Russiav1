@@ -52,6 +52,7 @@ model RadarReport {
   russiaInsights       Json           @map("russia_insights")
   crisisAlerts         Json           @map("crisis_alerts")
   status               ReportStatus   @default(COMPLETED)
+  posts                ScrapedPost[]
   actionItems          ActionItem[]
   
   @@map("radar_reports")
@@ -83,4 +84,51 @@ enum ActionStatus {
   NEW
   IN_PROGRESS
   RESOLVED
+}
+
+// -- Phase 4: Enhanced Post Model with Rich Metadata --
+model ScrapedPost {
+  id                  String     @id @default(uuid())
+  reportId            String?    @map("report_id")
+  report              RadarReport? @relation(fields: [reportId], references: [id])
+  
+  // Source
+  platform            String
+  author              String
+  authorFollowers     Int        @default(0) @map("author_followers")
+  isInfluencer        Boolean    @default(false) @map("is_influencer")
+  contentOriginal     String     @db.Text @map("content_original")
+  contentTranslated   String?    @db.Text @map("content_translated")
+  url                 String
+  publishedAt         DateTime?  @map("published_at")
+  screenshotUrl       String?    @map("screenshot_url")
+  
+  // Engagement
+  likes               Int        @default(0)
+  comments            Int        @default(0)
+  shares              Int        @default(0)
+  views               Int        @default(0)
+  engagementScore     Float      @default(0) @map("engagement_score")
+  
+  // Analysis
+  sentiment           String     @default("neutral")
+  isCrisis            Boolean    @default(false) @map("is_crisis")
+  topics              String[]
+  language            String     @default("unknown")
+  sourceKeyword       String?    @map("source_keyword")
+  
+  // Actions
+  flagged             Boolean    @default(false)
+  archived            Boolean    @default(false)
+  actionTaken         String?    @map("action_taken")
+  actionTakenAt       DateTime?  @map("action_taken_at")
+  
+  // Metadata
+  createdAt           DateTime   @default(now()) @map("created_at")
+  updatedAt           DateTime   @updatedAt @map("updated_at")
+  
+  @@index([platform, publishedAt])
+  @@index([isCrisis])
+  @@index([topics])
+  @@map("scraped_posts")
 }
