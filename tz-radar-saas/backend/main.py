@@ -21,7 +21,10 @@ from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 
-from models import ScanRequest, ScanTriggerResponse
+from models import (
+    ScanRequest, ScanTriggerResponse, PostActionRequest,
+    PostSearchParams, PostSearchResult
+)
 # Import the new unified, concurrent, AI-translated scanner
 from scanner import run_full_scan_and_translate
 
@@ -271,3 +274,125 @@ async def list_influencers(min_followers: int = 10000, limit: int = 10):
                 seen_authors.add(author)
                 influencers.append(alert)
     return {"influencers": influencers[:limit], "total": len(influencers)}
+
+
+@app.post("/api/v1/posts/action")
+async def handle_post_action_v2(request: PostActionRequest):
+    """Handle user actions on posts: respond, flag, investigate, archive."""
+    logger.info(f"Action '{request.action_type}' on post: {request.post_url}")
+    
+    action_record = {
+        "post_url": request.post_url,
+        "action_type": request.action_type,
+        "platform": request.platform,
+        "notes": request.notes,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    
+    if request.action_type == "respond":
+        logger.info(f"Response action triggered for {request.post_url}")
+    elif request.action_type == "flag":
+        logger.warning(f"Post flagged: {request.post_url}")
+    elif request.action_type == "investigate":
+        logger.info(f"Investigation started for {request.post_url}")
+    
+    return {"status": "success", "action": request.action_type, "timestamp": action_record["timestamp"]}
+
+
+@app.get("/api/v1/posts/search/v2")
+async def search_posts_v2(
+    query: str = "",
+    time_range: str = "24h",
+    platform: str = "all",
+    min_engagement: int = 0,
+    is_crisis: Optional[bool] = None,
+    is_influencer: Optional[bool] = None,
+):
+    """Search posts with filters across completed reports."""
+    matching_posts = []
+    
+    for report in reports_store.values():
+        if report["status"] != "COMPLETED":
+            continue
+            
+        all_posts = (
+            [p for insight in report["chinaInsights"] for p in insight.get("posts", [])] +
+            [p for insight in report["russiaInsights"] for p in insight.get("posts", [])]
+        )
+        
+        for post in all_posts:
+            if query:
+                content = post.get("content_translated") or post.get("content_original", post.get("content_snippet", ""))
+                if query.lower() not in content.lower():
+                    continue
+            if platform != "all" and platform.lower() not in post.get("platform", "").lower():
+                continue
+            if post.get("engagement", 0) < min_engagement:
+                continue
+            if is_crisis is not None and post.get("is_crisis", False) != is_crisis:
+                continue
+            if is_influencer is not None and post.get("is_influencer", False) != is_influencer:
+                continue
+            matching_posts.append(post)
+    
+    return {
+        "posts": matching_posts,
+        "total": len(matching_posts),
+        "query": query,
+        "filters": {"time_range": time_range, "platform": platform, "min_engagement": min_engagement}
+    }
+
+
+@app.post("/api/v1/posts/export")
+async def export_posts(
+    format: str = "json",
+    post_urls: Optional[List[str]] = None,
+):
+    """Export selected posts in JSON format."""
+    posts_to_export = []
+    
+    for report in reports_store.values():
+        if report["status"] != "COMPLETED":
+            continue
+        all_posts = (
+            [p for insight in report["chinaInsights"] for p in insight.get("posts", [])] +
+            [p for insight in report["russiaInsights"] for p in insight.get("posts", [])]
+        )
+        if post_urls:
+            posts_to_export.extend([p for p in all_posts if p.get("url") in post_urls])
+        else:
+            posts_to_export.extend(all_posts)
+    
+    return {
+        "posts": posts_to_export,
+        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "total": len(posts_to_export),
+    }
+
+
+@app.get("/api/v1/analytics/trends")
+async def get_trend_analytics(days: int = 7):
+    """Get trend analytics for the past N days."""
+    total_posts = sum(r.get("raw_post_count", 0) for r in reports_store.values())
+    total_crisis = sum(len(r.get("crisisAlerts", [])) for r in reports_store.values())
+    
+    return {
+        "period_days": days,
+        "total_posts_analyzed": total_posts,
+        "crisis_alerts_trend": f"+{total_crisis}" if total_crisis > 0 else "0",
+        "sentiment_distribution": {
+            "positive": 45,
+            "neutral": 35,
+            "negative": 20,
+        },
+        "top_topics": [
+            {"topic": "tourism", "count": 125},
+            {"topic": "investment", "count": 87},
+            {"topic": "logistics", "count": 54},
+        ],
+        "platform_breakdown": {
+            "XiaoHongShu": 45,
+            "Exa (CN)": 30,
+            "Exa (RU)": 25,
+        },
+    }

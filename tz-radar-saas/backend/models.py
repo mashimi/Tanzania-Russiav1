@@ -27,7 +27,7 @@ class MarketInsight(BaseModel):
 class RadarReportResponse(BaseModel):
     id: str
     clientId: str
-    status: str  # PROCESSING | COMPLETED | FAILED
+    status: str
     executiveSummary: str
     chinaInsights: List[Dict[str, Any]]
     russiaInsights: List[Dict[str, Any]]
@@ -41,9 +41,11 @@ class ScanTriggerResponse(BaseModel):
     status: str = "processing"
 
 
-# -- Phase 3: Action & Search Schemas --
 class PostActionRequest(BaseModel):
-    action_type: str  # respond, flag, investigate, archive
+    post_url: str
+    action_type: str  # "respond", "flag", "investigate", "archive"
+    platform: str
+    notes: Optional[str] = None
 
 
 class PostEngagement(BaseModel):

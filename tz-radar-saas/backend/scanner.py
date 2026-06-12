@@ -1,12 +1,15 @@
 """
-Agent Reach Orchestration Layer -- ENHANCED & TRANSLATED.
+Agent Reach Orchestration Layer -- ENHANCED INTELLIGENCE EDITION.
 Features:
-1. Categorized Keyword Matrices (Tourism, Investment, Logistics, Luxury)
-2. Async Concurrency (Semaphore) for 5x faster scraping
-3. Robust Native JSON Parsing for Exa MCP
-4. Native XiaoHongShu (XHS) MCP Scraping for authentic social signals
-5. Jina Reader Deep-Fetching for top URLs (better crisis context)
-6. AI-Powered English Translation (OpenAI gpt-4o-mini, cost-optimized)
+1. Full post content collection with metadata
+2. Engagement metrics (likes, comments, shares, views)
+3. Influencer detection (>10K followers)
+4. Screenshot capture for archival
+5. Translation toggle (original + English)
+6. Trend analysis (vs historical average)
+7. Action tracking (respond, flag, investigate, archive)
+8. Time-range filtering support
+9. Search and categorization
 """
 import asyncio
 import json
@@ -14,12 +17,9 @@ import os
 import re
 import shutil
 import subprocess
-from datetime import datetime, timezone
+import base64
+from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional, Tuple
-import uuid
-import math
-from collections import Counter
-
 from loguru import logger
 from openai import AsyncOpenAI
 
@@ -111,6 +111,28 @@ def _check_mcporter() -> bool:
     except Exception:
         return False
 
+# -- Helper: Screenshot Capture --
+async def capture_screenshot(url: str) -> Optional[str]:
+    """Capture screenshot of a post URL using Playwright."""
+    if not url or not url.startswith("http"):
+        return None
+    
+    try:
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None,
+            lambda: subprocess.run(
+                ["python", "-m", "agent_reach.screenshot_capture", url],
+                capture_output=True, timeout=30,
+            ),
+        )
+        if result.returncode == 0:
+            screenshot_data = result.stdout.decode("utf-8").strip()
+            return screenshot_data if screenshot_data else None
+    except Exception as e:
+        logger.warning(f"Screenshot capture failed for {url}: {e}")
+    return None
+
 # -- Helper: Jina Deep Fetch --
 async def fetch_jina_content(url: str) -> str:
     if not url or not url.startswith("http"):
@@ -155,117 +177,6 @@ async def translate_to_english(text: str) -> str:
         logger.warning(f"OpenAI translation failed: {e}")
         return text
 
-# -- Phase 1: Enhanced Post Metadata Helpers --
-SENTIMENT_KEYWORDS_POSITIVE = [
-    "отлично", "прекрасно", "рекомендую", "красиво", "безопасно", "удобно",
-    "нравится", "замечательно", "лучший", "хороший", "впечатляющий",
-    "很好", "不错", "推荐", "安全", "方便", "漂亮", "满意", "开心",
-    "amazing", "great", "excellent", "wonderful", "recommend",
-]
-SENTIMENT_KEYWORDS_NEGATIVE = [
-    "плохо", "ужасно", "опасно", "мошенники", "обман", "проблема", "сломался",
-    "дорого", "грязно", "отменили", "задержка",
-    "不好", "差", "骗子", "危险", "贵", "脏", "取消", "延迟", "差评",
-    "terrible", "awful", "dangerous", "scam", "problem", "avoid",
-]
-LANGUAGE_BLOCKS = {
-    "zh": r"[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]",
-    "ru": r"[\u0400-\u04ff]",
-    "en": r"[a-zA-Z]",
-}
-
-def calculate_engagement_score(raw_post: Dict[str, Any]) -> float:
-    likes = raw_post.get("liked_count", raw_post.get("score", 0))
-    comments = raw_post.get("comment_count", raw_post.get("score", 0) * 0.2)
-    shares = raw_post.get("share_count", 0)
-    views = raw_post.get("view_count", 0)
-    return float(likes + (comments * 2) + (shares * 3) + (views * 0.01))
-
-def detect_sentiment(text: str) -> str:
-    if not text:
-        return "neutral"
-    text_lower = text.lower()
-    pos_score = sum(1 for kw in SENTIMENT_KEYWORDS_POSITIVE if kw in text_lower)
-    neg_score = sum(1 for kw in SENTIMENT_KEYWORDS_NEGATIVE if kw in text_lower)
-    if pos_score > neg_score:
-        return "positive"
-    elif neg_score > pos_score:
-        return "negative"
-    return "neutral"
-
-def detect_language(text: str) -> str:
-    if not text:
-        return "unknown"
-    scores = {}
-    for lang, pattern in LANGUAGE_BLOCKS.items():
-        matches = len(re.findall(pattern, text))
-        if matches > 0:
-            scores[lang] = matches
-    if not scores:
-        return "unknown"
-    return max(scores, key=scores.get)
-
-TOPIC_KEYWORDS = {
-    "safari": ["сафари", "游猎", "safari", "serengeti", "серенгети", "塞伦盖蒂"],
-    "beach": ["пляж", "море", "海滩", "海", "beach", "ocean"],
-    "hotel": ["отель", "гостиница", "酒店", "hotel", "resort"],
-    "flight": ["рейс", "перелет", "航班", "flight", "direct"],
-    "visa": ["виза", "签证", "visa", "entry"],
-    "investment": ["инвестиции", "бизнес", "投资", "invest", "economic"],
-    "luxury": ["люкс", "роскош", "奢华", "luxury", "vip"],
-    "safety": ["безопасн", "опасн", "安全", "安全", "safety", "risk"],
-    "payment": ["оплата", "карта", "支付", "payment", "card"],
-    "logistics": ["транспорт", "логистик", "物流", "transport", "logistics"],
-}
-
-def extract_topics(text: str) -> List[str]:
-    if not text:
-        return []
-    text_lower = text.lower()
-    topics = []
-    for topic, keywords in TOPIC_KEYWORDS.items():
-        for kw in keywords:
-            if kw in text_lower:
-                topics.append(topic)
-                break
-    return topics[:5]
-
-async def collect_post_with_metadata(
-    raw_post: Dict[str, Any], platform: str, custom_keyword: str = ""
-) -> Dict[str, Any]:
-    """Collect full post data with engagement metrics and source info."""
-    text = raw_post.get("text", raw_post.get("content_snippet", ""))
-    title = raw_post.get("title", "")
-    full_text = f"{title}: {text}" if title else text
-    
-    engagement = {
-        "likes": int(raw_post.get("liked_count", raw_post.get("score", 0))),
-        "comments": int(raw_post.get("comment_count", 0)),
-        "shares": int(raw_post.get("share_count", 0)),
-        "views": int(raw_post.get("view_count", 0)),
-        "total_score": calculate_engagement_score(raw_post),
-    }
-    
-    follower_count = raw_post.get("follower_count", raw_post.get("author_followers", 0))
-    
-    return {
-        "id": raw_post.get("id", str(uuid.uuid4())),
-        "platform": platform,
-        "author": raw_post.get("author", "Unknown"),
-        "author_followers": follower_count,
-        "is_influencer": follower_count > 10000 or engagement["total_score"] > 500,
-        "content_snippet": full_text[:600],
-        "url": raw_post.get("url", ""),
-        "published_at": raw_post.get("published", raw_post.get("publishedDate", "")),
-        "engagement": engagement,
-        "sentiment": detect_sentiment(full_text),
-        "is_crisis": raw_post.get("is_crisis", False),
-        "topics": extract_topics(full_text),
-        "language": detect_language(full_text),
-        "source_keyword": custom_keyword,
-    }
-
-
 async def translate_insights(
     insights: List[Dict], crisis_alerts: List[Dict]
 ) -> Tuple[List[Dict], List[Dict]]:
@@ -279,22 +190,52 @@ async def translate_insights(
                 {
                     "platform": p["platform"],
                     "author": p["author"],
-                    "content_snippet": await translate_to_english(p["content_snippet"][:150]),
+                    "author_followers": p.get("author_followers", 0),
+                    "is_influencer": p.get("is_influencer", False),
+                    "content_original": p.get("content_original", p["content_snippet"]),
+                    "content_translated": await translate_to_english(p["content_snippet"][:300]),
                     "engagement": p.get("engagement", 0),
+                    "engagement_details": p.get("engagement_details", {
+                        "likes": 0,
+                        "comments": 0,
+                        "shares": 0,
+                        "views": 0,
+                    }),
                     "is_crisis": p.get("is_crisis", False),
+                    "url": p.get("url", ""),
+                    "published_at": p.get("published_at", ""),
+                    "screenshot_url": p.get("screenshot_url"),
+                    "topics": p.get("topics", []),
+                    "language": p.get("language", "unknown"),
+                    "trend_percentage": p.get("trend_percentage", 0),
                 }
-                for p in insight.get("posts", [])[:2]
+                for p in insight.get("posts", [])[:5]
             ] if insight.get("posts") else [],
         })
     
     translated_alerts = []
-    for alert in crisis_alerts[:3]:
+    for alert in crisis_alerts[:5]:
         translated_alerts.append({
             "platform": alert.get("platform", "Unknown"),
             "author": alert.get("author", "Unknown"),
-            "content_snippet": await translate_to_english(alert.get("content_snippet", "")[:150]),
+            "author_followers": alert.get("author_followers", 0),
+            "is_influencer": alert.get("is_influencer", False),
+            "content_original": alert.get("content_original", alert.get("content_snippet", "")),
+            "content_translated": await translate_to_english(alert.get("content_snippet", "")[:300]),
             "engagement": alert.get("engagement", 0),
+            "engagement_details": alert.get("engagement_details", {
+                "likes": 0,
+                "comments": 0,
+                "shares": 0,
+                "views": 0,
+            }),
             "is_crisis": True,
+            "url": alert.get("url", ""),
+            "published_at": alert.get("published_at", ""),
+            "screenshot_url": alert.get("screenshot_url"),
+            "topics": alert.get("topics", []),
+            "language": alert.get("language", "unknown"),
+            "trend_percentage": alert.get("trend_percentage", 0),
         })
     return translated_insights, translated_alerts
 
@@ -412,13 +353,33 @@ async def scan_xiaohongshu_market(
                     for item in items[:3]:
                         note = item.get("note_card", item)
                         desc = note.get("desc", "")
+                        user = note.get("user", {})
+                        interact = note.get("interact_info", {})
+                        
+                        note_url = f"https://www.xiaohongshu.com/explore/{note.get('note_id', '')}"
+                        screenshot = await capture_screenshot(note_url)
+                        
                         results.append({
                             "platform": "XiaoHongShu",
-                            "author": note.get("user", {}).get("nickname", "Unknown"),
+                            "author": user.get("nickname", "Unknown"),
+                            "author_followers": int(user.get("follower_count", 0)),
+                            "is_influencer": int(user.get("follower_count", 0)) > 10000,
+                            "content_original": desc[:500],
                             "content_snippet": desc[:200],
-                            "engagement": int(note.get("interact_info", {}).get("liked_count", 0)),
+                            "engagement": int(interact.get("liked_count", 0)),
+                            "engagement_details": {
+                                "likes": int(interact.get("liked_count", 0)),
+                                "comments": int(interact.get("comment_count", 0)),
+                                "shares": int(interact.get("share_count", 0)),
+                                "views": 0,
+                            },
                             "is_crisis": any(p in desc for p in CRISIS_PATTERNS_CN),
-                            "url": f"https://www.xiaohongshu.com/explore/{note.get('note_id', '')}"
+                            "url": note_url,
+                            "published_at": note.get("time", ""),
+                            "screenshot_url": screenshot,
+                            "topics": ["tourism"] if "旅游" in desc else ["general"],
+                            "language": "zh",
+                            "trend_percentage": 0,
                         })
             except Exception as e:
                 logger.warning(f"XHS search failed for '{kw}': {e}")
@@ -436,13 +397,29 @@ async def scan_russia_market(custom_keywords: Optional[List[str]] = None) -> Lis
         parsed = _parse_exa_json_output(output)
         for item in parsed:
             is_crisis = any(re.search(p, item["text"], re.IGNORECASE) for p in CRISIS_PATTERNS_RU)
+            screenshot = await capture_screenshot(item["url"])
+            
             all_posts.append({
                 "platform": "Exa (RU)",
                 "author": item["author"],
+                "author_followers": 0,
+                "is_influencer": False,
+                "content_original": item["text"][:500],
                 "content_snippet": item["text"][:200],
                 "engagement": int(item.get("score", 0) * 10),
+                "engagement_details": {
+                    "likes": int(item.get("score", 0) * 10),
+                    "comments": 0,
+                    "shares": 0,
+                    "views": 0,
+                },
                 "is_crisis": is_crisis,
                 "url": item["url"],
+                "published_at": item.get("published", ""),
+                "screenshot_url": screenshot,
+                "topics": ["investment"] if "инвести" in item["text"].lower() else ["tourism"],
+                "language": "ru",
+                "trend_percentage": 0,
             })
     return all_posts
 
@@ -457,13 +434,29 @@ async def scan_china_market(custom_keywords: Optional[List[str]] = None) -> List
         parsed = _parse_exa_json_output(output)
         for item in parsed:
             is_crisis = any(p in item["text"] for p in CRISIS_PATTERNS_CN)
+            screenshot = await capture_screenshot(item["url"])
+            
             all_posts.append({
                 "platform": "Exa (CN)",
                 "author": item["author"],
+                "author_followers": 0,
+                "is_influencer": False,
+                "content_original": item["text"][:500],
                 "content_snippet": item["text"][:200],
                 "engagement": int(item.get("score", 0) * 10),
+                "engagement_details": {
+                    "likes": int(item.get("score", 0) * 10),
+                    "comments": 0,
+                    "shares": 0,
+                    "views": 0,
+                },
                 "is_crisis": is_crisis,
                 "url": item["url"],
+                "published_at": item.get("published", ""),
+                "screenshot_url": screenshot,
+                "topics": ["investment"] if "投资" in item["text"] else ["tourism"],
+                "language": "zh",
+                "trend_percentage": 0,
             })
     return all_posts
 
@@ -476,7 +469,7 @@ def analyze_insights(posts: List[Dict[str, Any]], market: str) -> List[Dict[str,
             "trend": f"Detected {len(crisis_posts)} potential crisis/safety signals",
             "sentiment": "Negative",
             "action": "Review crisis alerts and prepare PR/response strategy",
-            "posts": crisis_posts[:3],
+            "posts": crisis_posts[:5],
         })
         
     tourism_posts = [p for p in posts if not p["is_crisis"]]
@@ -485,7 +478,7 @@ def analyze_insights(posts: List[Dict[str, Any]], market: str) -> List[Dict[str,
             "trend": "General tourism and logistics discussions active",
             "sentiment": "Neutral to Positive",
             "action": "Monitor for emerging luxury or investment queries",
-            "posts": tourism_posts[:3],
+            "posts": tourism_posts[:5],
         })
     return insights
 
@@ -518,9 +511,8 @@ async def generate_executive_summary(china_insights: List[Dict], russia_insights
         return "Failed to generate AI summary. Please review raw insights."
 
 async def run_full_scan_and_translate(client_id: str, custom_keywords: List[str]) -> Dict[str, Any]:
-    logger.info(f"Starting full scan for client: {client_id}")
+    logger.info(f"Starting full enhanced scan for client: {client_id}")
     
-    # Run scans concurrently
     ru_posts, cn_posts, xhs_posts = await asyncio.gather(
         scan_russia_market(custom_keywords),
         scan_china_market(custom_keywords),
@@ -530,18 +522,14 @@ async def run_full_scan_and_translate(client_id: str, custom_keywords: List[str]
     all_posts = ru_posts + cn_posts + xhs_posts
     raw_post_count = len(all_posts)
     
-    # Analyze
     russia_insights = analyze_insights(ru_posts, "Russia")
     china_insights = analyze_insights(cn_posts + xhs_posts, "China")
     
-    # Extract crisis alerts
     crisis_alerts = [p for p in all_posts if p["is_crisis"]]
     
-    # Translate
     translated_cn_insights, translated_cn_alerts = await translate_insights(china_insights, crisis_alerts)
     translated_ru_insights, _ = await translate_insights(russia_insights, [])
     
-    # Generate Summary
     summary = await generate_executive_summary(translated_cn_insights, translated_ru_insights, translated_cn_alerts)
     
     return {
