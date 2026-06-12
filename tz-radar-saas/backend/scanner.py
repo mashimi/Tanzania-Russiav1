@@ -4,10 +4,9 @@ Features:
 1. Categorized Keyword Matrices (Tourism, Investment, Logistics, Luxury)
 2. Async Concurrency (Semaphore) for 5x faster scraping
 3. Robust Native JSON Parsing for Exa MCP
-4. Native XiaoHongShu (XHS) MCP Scraping
+4. Native XiaoHongShu (XHS) MCP Scraping for authentic social signals
 5. Jina Reader Deep-Fetching for top URLs (better crisis context)
 6. AI-Powered English Translation (OpenAI gpt-4o-mini, cost-optimized)
-7. Expanded Forum Sources (awd.ru, tonkosti.ru, zhihu.com, etc.)
 """
 import asyncio
 import json
@@ -21,107 +20,94 @@ from typing import Any, Dict, List, Optional, Tuple
 from loguru import logger
 from openai import AsyncOpenAI
 
-# -- OpenAI Client Setup -----------------------------------------------
+# -- OpenAI Client Setup --
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 
 if not OPENAI_API_KEY:
-    logger.warning(
-        "OPENAI_API_KEY not set. "
-        "Translation will fallback to original text."
-    )
+    logger.warning("OPENAI_API_KEY not set. Translation will fallback to original text.")
 
-# -- Expanded Categorized Keyword Matrices & Forum Targets ------------
+# -- Keyword Matrices & Forum Targets --
 FORUM_DOMAINS_RU = ["awd.ru", "tonkosti.ru", "forum.awd.ru", "pikabu.ru", "vk.com"]
-FORUM_DOMAINS_CN = [
-    "xiaohongshu.com",
-    "zhihu.com",
-    "weibo.com",
-    "bilibili.com",
-]
+FORUM_DOMAINS_CN = ["xiaohongshu.com", "zhihu.com", "weibo.com", "bilibili.com"]
 
-KEYWORD_MATRIX_RU: Dict[str, List[str]] = {
+KEYWORD_MATRIX_RU = {
     "tourism": [
-        "Zanzibar отдых 2025",
-        "Tanzania сафари отзывы",
-        "Tanzania туризм все включено",
-        "российские туристы Tanzania",
-        "Tanzania виза новости",
+        "\u0417\u0430\u043d\u0437\u0438\u0431\u0430\u0440 \u043e\u0442\u0434\u044b\u0445 2025",
+        "\u0422\u0430\u043d\u0437\u0430\u043d\u0438\u044f \u0441\u0430\u0444\u0430\u0440\u0438 \u043e\u0442\u0437\u044b\u0432\u044b",
+        "\u0422\u0430\u043d\u0437\u0430\u043d\u0438\u044f \u0442\u0443\u0440\u0438\u0437\u043c \u0432\u0441\u0435 \u0432\u043a\u043b\u044e\u0447\u0435\u043d\u043e",
+        "\u0440\u043e\u0441\u0441\u0438\u0439\u0441\u043a\u0438\u0435 \u0442\u0443\u0440\u0438\u0441\u0442\u044b \u0422\u0430\u043d\u0437\u0430\u043d\u0438\u044f",
+        "\u0422\u0430\u043d\u0437\u0430\u043d\u0438\u044f \u0432\u0438\u0437\u0430 \u043d\u043e\u0432\u043e\u0441\u0442\u0438",
     ],
     "investment": [
-        "Tanzania инвестиции 2025",
-        "Tanzania Самия Сулуху Хассан",
-        "Zanzibar бизнес делегация",
-        "Tanzania Россия экономика",
-        "Tanzania туризм партнёрство",
-        "Zanzibar инвестиции",
-        "Дар-эс-Салам деловая миссия",
-        "Tanzania добыча золота",
+        "\u0422\u0430\u043d\u0437\u0430\u043d\u0438\u044f \u0438\u043d\u0432\u0435\u0441\u0442\u0438\u0446\u0438\u0438 2025",
+        "\u0417\u0430\u043d\u0437\u0438\u0431\u0430\u0440 \u0431\u0438\u0437\u043d\u0435\u0441 \u0434\u0435\u043b\u0435\u0433\u0430\u0446\u0438\u044f",
+        "\u0422\u0430\u043d\u0437\u0430\u043d\u0438\u044f \u0420\u043e\u0441\u0441\u0438\u044f \u044d\u043a\u043e\u043d\u043e\u043c\u0438\u043a\u0430",
+        "\u0422\u0430\u043d\u0437\u0430\u043d\u0438\u044f \u0421\u0430\u043c\u0438\u044f \u0421\u0443\u043b\u0443\u0445\u0443 \u0425\u0430\u0441\u0441\u0430\u043d",
+        "\u0417\u0430\u043d\u0437\u0438\u0431\u0430\u0440 \u0438\u043d\u0432\u0435\u0441\u0442\u0438\u0446\u0438\u0438",
+        "\u0422\u0430\u043d\u0437\u0430\u043d\u0438\u044f \u0420\u043e\u0441\u0441\u0438\u044f \u0442\u0443\u0440\u0438\u0437\u043c \u043f\u0430\u0440\u0442\u043d\u0451\u0440\u0441\u0442\u0432\u043e",
+        "\u0414\u0430\u0440-\u044d\u0441-\u0421\u0430\u043b\u0430\u043c \u0434\u0435\u043b\u043e\u0432\u0430\u044f \u043c\u0438\u0441\u0441\u0438\u044f",
+        "\u0422\u0430\u043d\u0437\u0430\u043d\u0438\u044f \u0434\u043e\u0431\u044b\u0447\u0430 \u0437\u043e\u043b\u043e\u0442\u0430",
     ],
     "logistics": [
-        "прямые рейсы Tanzania",
-        "Tanzania перелет из Москвы",
-        "Tanzania оплата картой",
+        "\u043f\u0440\u044f\u043c\u044b\u0435 \u0440\u0435\u0439\u0441\u044b \u0422\u0430\u043d\u0437\u0430\u043d\u0438\u044f",
+        "\u0422\u0430\u043d\u0437\u0430\u043d\u0438\u044f \u043f\u0435\u0440\u0435\u043b\u0435\u0442 \u0438\u0437 \u041c\u043e\u0441\u043a\u0432\u044b",
+        "\u0422\u0430\u043d\u0437\u0430\u043d\u0438\u044f \u043e\u043f\u043b\u0430\u0442\u0430 \u043a\u0430\u0440\u0442\u043e\u0439",
     ],
     "luxury": [
-        "роскошные отели Zanzibar",
-        "Tanzania VIP тур",
-        "Серенгети люкс сафари",
+        "\u0440\u043e\u0441\u043a\u043e\u0448\u043d\u044b\u0435 \u043e\u0442\u0435\u043b\u0438 \u0417\u0430\u043d\u0437\u0438\u0431\u0430\u0440",
+        "\u0422\u0430\u043d\u0437\u0430\u043d\u0438\u044f VIP \u0442\u0443\u0440",
+        "\u0421\u0435\u0440\u0435\u043d\u0433\u0435\u0442\u0438 \u043b\u044e\u043a\u0441 \u0441\u0430\u0444\u0430\u0440\u0438",
     ],
 }
 
-KEYWORD_MATRIX_CN: Dict[str, List[str]] = {
+KEYWORD_MATRIX_CN = {
     "tourism": [
-        "Tanzania 旅游攻略",
-        "Zanzibar 酒店 推荐",
-        "Tanzania 游猎 避坑",
-        "Tanzania 塞伦盖蒂 动物大迁徙",
-        "Tanzania 乞力马扎罗 登山",
-        "Tanzania 中文导游",
-        "Tanzania 旅游 安全",
+        "\u5766\u6851\u5c3c\u4e9a \u65c5\u6e38\u653b\u7565",
+        "\u6851\u7ed9\u5df4\u5c14 \u9152\u5e97 \u63a8\u8350",
+        "\u5766\u6851\u5c3c\u4e9a \u6e38\u730e \u907f\u5751",
+        "\u5766\u6851\u5c3c\u4e9a \u585e\u4f26\u76d6\u8482 \u52a8\u7269\u5927\u8fc1\u5f99",
+        "\u5766\u6851\u5c3c\u4e9a \u4e03\u529b\u9a6c\u624e\u7f57 \u767b\u5c71",
+        "\u5766\u6851\u5c3c\u4e9a \u4e2d\u6587\u5bfc\u6e38",
+        "\u5766\u6851\u5c3c\u4e9a \u65c5\u6e38 \u5b89\u5168",
     ],
     "investment": [
-        "Tanzania 投资 机遇",
-        "中坦 旅游 合作",
-        "Tanzania 总统 经济",
-        "Zanzibar 商务 考察",
-        "Tanzania 一带一路",
-        "Tanzania 矿业 合作",
-        "Tanzania 农业 投资",
-        "中坦 经贸 合作",
-        "Tanzania 房地产 投资",
-        "达累斯萨拉姆 港口",
+        "\u5766\u6851\u5c3c\u4e9a \u6295\u8d44 \u673a\u9047",
+        "\u4e2d\u5766 \u65c5\u6e38 \u5408\u4f5c",
+        "\u5766\u6851\u5c3c\u4e9a \u603b\u7edf \u7ecf\u6d4e",
+        "\u6851\u7ed9\u5df4\u5c14 \u5546\u52a1 \u8003\u5bdf",
+        "\u5766\u6851\u5c3c\u4e9a \u4e00\u5e26\u4e00\u8def",
+        "\u5766\u6851\u5c3c\u4e9a \u77ff\u4e1a \u5408\u4f5c",
+        "\u5766\u6851\u5c3c\u4e9a \u519c\u4e1a \u6295\u8d44",
+        "\u4e2d\u5766 \u7ecf\u8d38 \u5408\u4f5c",
+        "\u5766\u6851\u5c3c\u4e9a \u623f\u5730\u4ea7 \u6295\u8d44",
+        "\u8fbe\u7d2f\u65af\u8428\u62c9\u59c6 \u6e2f\u53e3",
     ],
     "logistics": [
-        "Tanzania 签证 政策",
-        "Tanzania 直飞 航班",
-        "Tanzania 机票 价格",
-        "Tanzania 坦赞铁路",
+        "\u5766\u6851\u5c3c\u4e9a \u7b7e\u8bc1 \u653f\u7b56",
+        "\u5766\u6851\u5c3c\u4e9a \u76f4\u98de \u822a\u73ed",
+        "\u5766\u6851\u5c3c\u4e9a \u673a\u7968 \u4ef7\u683c",
+        "\u5766\u6851\u5c3c\u4e9a \u5766\u8d5e\u94c1\u8def",
     ],
     "luxury": [
-        "Zanzibar 奢华 度假村",
-        "Tanzania 高端 定制 游",
-        "塞伦盖蒂 豪华 帐篷",
+        "\u6851\u7ed9\u5df4\u5c14 \u5962\u534e \u5ea6\u5047\u6751",
+        "\u5766\u6851\u5c3c\u4e9a \u9ad8\u7aef \u5b9a\u5236 \u6e38",
+        "\u585e\u4f26\u76d6\u8482 \u8c6a\u534e \u5e10\u7bf7",
     ],
 }
 
 
 def get_all_keywords(
-    matrix: Dict[str, List[str]],
-    custom_keywords: Optional[List[str]] = None,
+    matrix: dict, custom_keywords: Optional[List[str]] = None
 ) -> List[str]:
-    """Flatten the categorized matrix and deduplicate, adding client custom keywords."""
-    flat_list: List[str] = []
-    for category in matrix.values():
-        flat_list.extend(category)
+    flat_list = [kw for category in matrix.values() for kw in category]
     if custom_keywords:
         flat_list.extend(custom_keywords)
     return list(dict.fromkeys(flat_list))
 
 
-# -- Crisis & Pattern Detection (Original Language) --------------------
-
-CRISIS_PATTERNS_RU: List[str] = [
+# -- Crisis & Pattern Detection --
+CRISIS_PATTERNS_RU = [
     r"\u043f\u0440\u043e\u0431\u043b\u0435\u043c",
     r"\u043c\u043e\u0448\u0435\u043d",
     r"\u043e\u043f\u0430\u0441\u043d",
@@ -133,118 +119,77 @@ CRISIS_PATTERNS_RU: List[str] = [
     r"\u0431\u043e\u043b\u0435\u0437\u043d",
     r"\u043c\u0430\u043b\u044f\u0440",
 ]
-CRISIS_PATTERNS_CN: List[str] = [
-    "\u907f\u5751",
-    "\u759f\u75be",
-    "\u5bb0\u5ba2",
-    "\u8bc8\u9a97",
-    "\u5371\u9669",
-    "\u62a2\u52ab",
-    "\u751f\u75c5",
-    "\u4e8b\u6545",
+CRISIS_PATTERNS_CN = [
+    "\u907f\u5751", "\u7593\u75be", "\u5bb0\u5ba2",
+    "\u8bc8\u9a97", "\u5371\u9669", "\u62a2\u52ab",
+    "\u751f\u75c5", "\u4e8b\u6545",
 ]
 
-PAYMENT_PATTERNS_RU: List[str] = [
+PAYMENT_PATTERNS_RU = [
     r"\u043e\u043f\u043b\u0430\u0442\u0430",
     r"\u043a\u0430\u0440\u0442\u0430",
     r"\u0434\u0435\u043d\u044c\u0433\u0438",
     r"\u043f\u0435\u0440\u0435\u0432\u043e\u0434",
-    r"\u0432\u0430\u043b\u044e\u0442\u0430",
 ]
-VISA_PATTERNS_RU: List[str] = [
+VISA_PATTERNS_RU = [
     r"\u0432\u0438\u0437\u0430",
     r"\u0434\u043e\u043a\u0443\u043c\u0435\u043d\u0442",
     r"\u043f\u0430\u0441\u043f\u043e\u0440\u0442",
     r"\u0440\u0430\u0437\u0440\u0435\u0448\u0435\u043d",
 ]
-FLIGHT_PATTERNS_RU: List[str] = [
+FLIGHT_PATTERNS_RU = [
     r"\u0440\u0435\u0439\u0441",
     r"\u0431\u0438\u043b\u0435\u0442",
     r"\u0430\u0432\u0438\u0430",
     r"\u0447\u0430\u0440\u0442\u0435\u0440",
 ]
-FLIGHT_PATTERNS_CN: List[str] = [
-    "\u822a\u73ed",
-    "\u76f4\u98de",
-    "\u673a\u7968",
-    "\u5305\u673a",
+FLIGHT_PATTERNS_CN = [
+    "\u822a\u73ed", "\u76f4\u98de", "\u673a\u7968", "\u5305\u673a",
 ]
 
-# -- Concurrency Control -----------------------------------------------
-
-EXA_SEMAPHORE = asyncio.Semaphore(3)  # Max 3 concurrent Exa searches
-XHS_SEMAPHORE = asyncio.Semaphore(2)  # Max 2 concurrent XHS searches
-
-# -- Helper: Mcporter Path ---------------------------------------------
-
-_MCPORTER_CHECK_CACHE: Optional[bool] = None
+# -- Concurrency Control --
+EXA_SEMAPHORE = asyncio.Semaphore(3)
+XHS_SEMAPHORE = asyncio.Semaphore(2)
 
 
+# -- Helper: Mcporter Path --
 def _get_mcporter_path() -> Optional[str]:
     import os as _os
-
     npm_global = _os.path.expanduser("~\\AppData\\Roaming\\npm")
     win_mcporter = _os.path.join(npm_global, "mcporter.cmd")
     if _os.path.isfile(win_mcporter):
         return win_mcporter
-    found = shutil.which("mcporter") or shutil.which("mcporter.cmd")
-    if found:
-        return found
-    logger.warning("mcporter not found. Install: npm install -g mcporter")
-    return None
+    return shutil.which("mcporter") or shutil.which("mcporter.cmd")
 
 
 def _check_mcporter() -> bool:
-    global _MCPORTER_CHECK_CACHE
-    if _MCPORTER_CHECK_CACHE is not None:
-        return _MCPORTER_CHECK_CACHE
-
     mcporter = _get_mcporter_path()
     if not mcporter:
-        _MCPORTER_CHECK_CACHE = False
         return False
-
-    shell = mcporter.lower().endswith(".cmd")
     try:
         r = subprocess.run(
             [mcporter, "config", "list"],
-            capture_output=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=10,
-            shell=shell,
+            capture_output=True, encoding="utf-8", timeout=5,
         )
-        ok = "exa" in r.stdout.lower()
-        _MCPORTER_CHECK_CACHE = ok
-        return ok
-    except Exception as e:
-        logger.info(
-            f"mcporter config preflight did not complete ({e}); "
-            "direct searches will still be attempted."
-        )
-        _MCPORTER_CHECK_CACHE = False
+        return "exa" in r.stdout.lower()
+    except Exception:
         return False
 
 
-# -- Helper: Jina Deep Fetch -------------------------------------------
-
-
+# -- Helper: Jina Deep Fetch --
 async def fetch_jina_content(url: str) -> str:
-    """Fetch full markdown content of a URL via Jina Reader for deeper context."""
     if not url or not url.startswith("http"):
         return ""
     jina_url = f"https://r.jina.ai/{url}"
     try:
         loop = asyncio.get_event_loop()
-
-        def _run() -> subprocess.CompletedProcess:
-            return subprocess.run(
+        result = await loop.run_in_executor(
+            None,
+            lambda: subprocess.run(
                 ["curl", "-s", "-m", "10", jina_url],
-                capture_output=True,
-                timeout=15,
-            )
-
-        result = await loop.run_in_executor(None, _run)
+                capture_output=True, timeout=15,
+            ),
+        )
         if result.returncode == 0:
             return result.stdout.decode("utf-8", errors="replace")[:1500]
     except Exception:
@@ -252,18 +197,12 @@ async def fetch_jina_content(url: str) -> str:
     return ""
 
 
-# -- Helper: AI Translation --------------------------------------------
-
-
+# -- Helper: AI Translation --
 async def translate_to_english(text: str) -> str:
-    """Translate text to professional English using OpenAI."""
     if not text or not openai_client or len(text) < 10:
         return text
-
-    # Skip if already mostly English
-    if re.match(r"^[A-Za-z0-9\s\-\_\.\,\!\?\']+$", text):
+    if re.match(r"^[A-Za-z0-9\s\-\_\.\,\!\?]+$", text):
         return text
-
     try:
         response = await openai_client.chat.completions.create(
             model="gpt-4o-mini",
@@ -272,9 +211,7 @@ async def translate_to_english(text: str) -> str:
                     "role": "system",
                     "content": (
                         "Translate the following text to professional, "
-                        "business-appropriate English. Preserve the original "
-                        "meaning, tone, and any specific proper nouns "
-                        "(e.g., Zanzibar, Serengeti)."
+                        "business-appropriate English. Preserve proper nouns."
                     ),
                 },
                 {"role": "user", "content": text},
@@ -291,37 +228,36 @@ async def translate_to_english(text: str) -> str:
 async def translate_insights(
     insights: List[Dict], crisis_alerts: List[Dict]
 ) -> Tuple[List[Dict], List[Dict]]:
-    """Translate only the final insights and top crisis alerts to save API costs."""
-    translated_insights: List[Dict] = []
+    translated_insights = []
     for insight in insights:
-        trend = await translate_to_english(insight["trend"])
-        action = await translate_to_english(insight["action"])
-        posts: List[Dict] = []
-        for p in insight.get("posts", [])[:2]:
-            snippet = await translate_to_english(p.get("content_snippet", "")[:150])
-            posts.append({
-                "platform": p["platform"],
-                "author": p["author"],
-                "content_snippet": snippet,
-                "engagement": p.get("engagement", 0),
-                "is_crisis": p.get("is_crisis", False),
-            })
         translated_insights.append({
-            "trend": trend,
+            "trend": await translate_to_english(insight["trend"]),
             "sentiment": insight["sentiment"],
-            "action": action,
-            "posts": posts,
+            "action": await translate_to_english(insight["action"]),
+            "posts": [
+                {
+                    "platform": p["platform"],
+                    "author": p["author"],
+                    "content_snippet": await translate_to_english(
+                        p["content_snippet"][:150]
+                    ),
+                    "engagement": p.get("engagement", 0),
+                    "is_crisis": p.get("is_crisis", False),
+                }
+                for p in insight.get("posts", [])[:2]
+            ]
+            if insight.get("posts")
+            else [],
         })
 
-    translated_alerts: List[Dict] = []
+    translated_alerts = []
     for alert in crisis_alerts[:3]:
-        snippet = await translate_to_english(
-            alert.get("content_snippet", "")[:150]
-        )
         translated_alerts.append({
             "platform": alert.get("platform", "Unknown"),
             "author": alert.get("author", "Unknown"),
-            "content_snippet": snippet,
+            "content_snippet": await translate_to_english(
+                alert.get("content_snippet", "")[:150]
+            ),
             "engagement": alert.get("engagement", 0),
             "is_crisis": True,
         })
@@ -329,66 +265,51 @@ async def translate_insights(
     return translated_insights, translated_alerts
 
 
-# -- Core Scanners -----------------------------------------------------
-
-
+# -- Core Scanners --
 async def run_exa_search_safe(
     keyword: str,
     num_results: int = 5,
     include_domains: Optional[List[str]] = None,
 ) -> str:
-    """Run Exa search with concurrency control and domain targeting."""
     mcporter = _get_mcporter_path()
     if not mcporter:
         return ""
 
-    domains_str = ""
-    if include_domains:
-        domains_str = f', includeDomains: {json.dumps(include_domains)}'
+    domains_str = (
+        f", includeDomains: {json.dumps(include_domains)}"
+        if include_domains
+        else ""
+    )
     cmd = [
-        mcporter,
-        "call",
+        mcporter, "call",
         f'exa.web_search_exa(query: "{keyword}", numResults: {num_results}{domains_str})',
     ]
 
     async with EXA_SEMAPHORE:
         logger.info(f"Exa searching: {keyword}")
         loop = asyncio.get_event_loop()
-
-        def _run() -> subprocess.CompletedProcess:
-            return subprocess.run(
-                cmd,
-                capture_output=True,
-                timeout=30,
-                shell=mcporter.lower().endswith(".cmd"),
-            )
-
         try:
+            def _run():
+                return subprocess.run(cmd, capture_output=True, timeout=30)
+
             result = await loop.run_in_executor(None, _run)
             if result.returncode != 0:
                 stderr_text = result.stderr.decode("utf-8", errors="replace")[:100]
                 logger.warning(f"Exa failed for '{keyword}': {stderr_text}")
                 return ""
             return result.stdout.decode("utf-8", errors="replace").strip()
-        except subprocess.TimeoutExpired:
-            logger.warning(f"Exa search timed out for '{keyword}'")
-            return ""
         except Exception as e:
             logger.error(f"Exa exception for '{keyword}': {e}")
             return ""
 
 
 def _parse_exa_json_output(output: str) -> List[Dict[str, Any]]:
-    """Parse Exa MCP output — try native JSON first, fall back to text parsing."""
     if not output:
         return []
-
-    # Attempt 1: native JSON
     try:
         data = json.loads(output)
-        results: List[Dict[str, Any]] = []
-        items = data.get("results", [])
-        for item in items:
+        results = []
+        for item in data.get("results", []):
             results.append({
                 "title": item.get("title", "No Title"),
                 "url": item.get("url", ""),
@@ -401,23 +322,16 @@ def _parse_exa_json_output(output: str) -> List[Dict[str, Any]]:
     except (json.JSONDecodeError, TypeError):
         pass
 
-    # Attempt 2: text-block format (Title: / URL: / Highlights:)
     logger.info("Exa output not JSON; parsing as text block.")
-    results: List[Dict[str, Any]] = []
+    results = []
     blocks = re.split(r"\n---\n", output.strip())
     for block in blocks:
         if not block.strip():
             continue
-        title = ""
-        url = ""
-        published = ""
-        author = ""
-        highlights = ""
-
+        title = url = published = author = highlights = ""
         lines = block.split("\n")
         in_highlights = False
-        highlight_lines: List[str] = []
-
+        highlight_lines = []
         for line in lines:
             if line.startswith("Title: "):
                 title = line[7:].strip()
@@ -433,10 +347,8 @@ def _parse_exa_json_output(output: str) -> List[Dict[str, Any]]:
                 cleaned = re.sub(r"\[\.\.\.\]", "", line).strip()
                 if cleaned:
                     highlight_lines.append(cleaned)
-
         highlights = " ".join(highlight_lines)
         text_val = highlights[:600] if highlights else title
-
         if title or highlights:
             results.append({
                 "title": title,
@@ -446,70 +358,51 @@ def _parse_exa_json_output(output: str) -> List[Dict[str, Any]]:
                 "text": text_val,
                 "score": 0,
             })
-
     return results
 
 
 async def scan_xiaohongshu_market(
     custom_keywords: Optional[List[str]] = None,
 ) -> List[Dict[str, Any]]:
-    """Scan XiaoHongShu for authentic Chinese tourist sentiment."""
     mcporter = _get_mcporter_path()
     if not mcporter:
         return []
 
     xhs_keywords = [
-        "Tanzania 旅游",
-        "Zanzibar 攻略",
-        "Tanzania 避坑",
-        "非洲 游猎",
+        "Tanzania lv you",
+        "Sanggeiba er gong lue",
+        "Tanzania bi keng",
+        "Fei zhou you lie",
     ] + (custom_keywords or [])
     xhs_keywords = list(dict.fromkeys(xhs_keywords))
-    all_posts: List[Dict[str, Any]] = []
+    all_posts = []
 
     async def fetch_xhs(kw: str) -> None:
         async with XHS_SEMAPHORE:
-            cmd = [
-                mcporter,
-                "call",
-                f'xiaohongshu.search_feeds(keyword: "{kw}")',
-            ]
+            cmd = [mcporter, "call", f'xiaohongshu.search_feeds(keyword: "{kw}")']
             try:
                 loop = asyncio.get_event_loop()
-
-                def _run() -> subprocess.CompletedProcess:
+                def _run():
                     return subprocess.run(
-                        cmd,
-                        capture_output=True,
-                        timeout=20,
+                        cmd, capture_output=True, timeout=20,
                         shell=mcporter.lower().endswith(".cmd"),
                     )
-
                 result = await loop.run_in_executor(None, _run)
                 if result.returncode == 0:
                     data = json.loads(
                         result.stdout.decode("utf-8", errors="replace")
                     )
-                    items = data.get("items", [])[:3]
-                    for item in items:
+                    for item in data.get("items", [])[:3]:
                         note = item.get("note_card", {})
-                        title = note.get("title", "")
-                        desc = note.get("desc", "")
-                        content = f"{title}: {desc}"
+                        content = f"{note.get('title', '')}: {note.get('desc', '')}"
                         all_posts.append({
                             "platform": "XiaoHongShu",
-                            "author": note.get("user", {}).get(
-                                "nickname", "Unknown"
-                            ),
+                            "author": note.get("user", {}).get("nickname", "Unknown"),
                             "content_snippet": content[:250],
                             "engagement": int(
-                                note.get("interact_info", {}).get(
-                                    "liked_count", 0
-                                )
+                                note.get("interact_info", {}).get("liked_count", 0)
                             ),
-                            "is_crisis": any(
-                                k in content for k in CRISIS_PATTERNS_CN
-                            ),
+                            "is_crisis": any(k in content for k in CRISIS_PATTERNS_CN),
                             "url": (
                                 f"https://www.xiaohongshu.com/explore/"
                                 f"{note.get('note_id', '')}"
@@ -544,14 +437,13 @@ async def scan_russia_market_enhanced(
         return []
 
     keywords = get_all_keywords(KEYWORD_MATRIX_RU, custom_keywords)
-
     exa_tasks = [
         run_exa_search_safe(kw, num_results=5, include_domains=FORUM_DOMAINS_RU)
         for kw in keywords
     ]
     exa_outputs = await asyncio.gather(*exa_tasks)
 
-    all_posts: List[Dict[str, Any]] = []
+    all_posts = []
     for kw, output in zip(keywords, exa_outputs):
         parsed_items = _parse_exa_json_output(output)
         for i, item in enumerate(parsed_items):
@@ -564,7 +456,6 @@ async def scan_russia_market_enhanced(
                 if deep_text
                 else content
             )
-
             all_posts.append({
                 "platform": "Exa (Russia Forums)",
                 "author": item["author"],
@@ -587,14 +478,13 @@ async def scan_china_market_enhanced(
         return []
 
     keywords = get_all_keywords(KEYWORD_MATRIX_CN, custom_keywords)
-
     exa_tasks = [
         run_exa_search_safe(kw, num_results=5, include_domains=FORUM_DOMAINS_CN)
         for kw in keywords
     ]
     exa_outputs = await asyncio.gather(*exa_tasks)
 
-    all_posts: List[Dict[str, Any]] = []
+    all_posts = []
     for kw, output in zip(keywords, exa_outputs):
         parsed_items = _parse_exa_json_output(output)
         for i, item in enumerate(parsed_items):
@@ -607,7 +497,6 @@ async def scan_china_market_enhanced(
                 if deep_text
                 else content
             )
-
             all_posts.append({
                 "platform": "Exa (China Forums)",
                 "author": item["author"],
@@ -619,27 +508,23 @@ async def scan_china_market_enhanced(
             })
         await asyncio.sleep(0.2)
 
-    # Run XiaoHongShu scan in parallel with existing results
     xhs_posts = await scan_xiaohongshu_market(custom_keywords)
     all_posts.extend(xhs_posts)
-
     return all_posts
 
 
-# -- Heuristic Analysis (Original Language) ----------------------------
-
+# -- Heuristic Analysis (Original Language) --
 
 def analyze_russia_posts(
     posts: List[Dict[str, Any]],
 ) -> Tuple[List[Dict], List[Dict]]:
-    insights: List[Dict] = []
+    insights = []
     crisis_alerts = [p for p in posts if p.get("is_crisis")]
     if not posts:
         return insights, crisis_alerts
 
     payment_posts = [
-        p
-        for p in posts
+        p for p in posts
         if _detect_crisis(p.get("content_snippet", ""), PAYMENT_PATTERNS_RU)
     ]
     if payment_posts:
@@ -651,8 +536,7 @@ def analyze_russia_posts(
         })
 
     visa_posts = [
-        p
-        for p in posts
+        p for p in posts
         if _detect_crisis(p.get("content_snippet", ""), VISA_PATTERNS_RU)
     ]
     if visa_posts:
@@ -664,15 +548,14 @@ def analyze_russia_posts(
         })
 
     flight_posts = [
-        p
-        for p in posts
+        p for p in posts
         if _detect_crisis(p.get("content_snippet", ""), FLIGHT_PATTERNS_RU)
     ]
     if flight_posts:
         insights.append({
             "trend": "Flights & Logistics / Aviabilety",
             "sentiment": "Positive",
-            "action": "Promote new Air Tanzania direct flights from Moscow. Create 'Moscow -> Zanzibar' packages.",
+            "action": "Promote new Air Tanzania direct flights from Moscow. Create Moscow to Zanzibar packages.",
             "posts": flight_posts[:2],
         })
 
@@ -682,66 +565,62 @@ def analyze_russia_posts(
 def analyze_china_posts(
     posts: List[Dict[str, Any]],
 ) -> Tuple[List[Dict], List[Dict]]:
-    insights: List[Dict] = []
+    insights = []
     crisis_alerts = [p for p in posts if p.get("is_crisis")]
     if not posts:
         return insights, crisis_alerts
 
     flight_cn = [
-        p
-        for p in posts
+        p for p in posts
         if _detect_crisis(p.get("content_snippet", ""), FLIGHT_PATTERNS_CN)
     ]
     if flight_cn:
         insights.append({
             "trend": "Direct Flight Discussion",
             "sentiment": "Positive",
-            "action": "Publish Chinese content about new flight connections. Emphasize convenience.",
+            "action": "Publish Chinese content about new flight connections.",
             "posts": flight_cn[:2],
         })
 
     invest_cn = [
-        p
-        for p in posts
+        p for p in posts
         if any(
             kw in p.get("content_snippet", "")
-            for kw in ["investment", "cooperation", "trade"]
+            for kw in ["\u6295\u8d44", "\u5408\u4f5c", "\u7ecf\u8d38", "\u4e00\u5e26\u4e00\u8def"]
         )
     ]
     if invest_cn:
         insights.append({
             "trend": "Belt & Road Investment",
             "sentiment": "Positive",
-            "action": "Publish Mandarin case studies on WeChat Official Accounts. Highlight Tanzania Belt & Road projects.",
+            "action": "Publish Mandarin case studies on WeChat Official Accounts.",
             "posts": invest_cn[:2],
         })
 
     visa_cn = [
-        p
-        for p in posts
-        if any(kw in p.get("content_snippet", "") for kw in ["visa", "policy", "entry"])
+        p for p in posts
+        if any(
+            kw in p.get("content_snippet", "")
+            for kw in ["\u7b7e\u8bc1", "\u653f\u7b56", "\u5165\u5883"]
+        )
     ]
     if visa_cn:
         insights.append({
             "trend": "Visa Policy Queries",
             "sentiment": "Neutral",
-            "action": "Ensure visa-on-arrival info is prominently displayed on XiaoHongShu and Weibo.",
+            "action": "Ensure visa-on-arrival info is displayed on XiaoHongShu and Weibo.",
             "posts": visa_cn[:2],
         })
 
     return insights, crisis_alerts
 
 
-# -- Main Orchestrator -------------------------------------------------
-
+# -- Main Orchestrator --
 
 async def run_full_scan_and_translate(
     client_id: str, custom_keywords: Optional[List[str]] = None
 ) -> Dict[str, Any]:
-    """Main entry point: Scrape, Analyze, Translate, and Return."""
-    logger.info(
-        "Starting enhanced multi-market scan with deep-fetch and translation..."
-    )
+    logger.info("Starting enhanced multi-market scan with deep-fetch and translation...")
 
     cn_posts, ru_posts = await asyncio.gather(
         scan_china_market_enhanced(custom_keywords),
@@ -750,8 +629,6 @@ async def run_full_scan_and_translate(
 
     ru_insights, ru_crisis = analyze_russia_posts(ru_posts)
     cn_insights, cn_crisis = analyze_china_posts(cn_posts)
-
-    all_crisis = ru_crisis + cn_crisis
 
     logger.info("Translating insights to English via OpenAI...")
     translated_ru_insights, translated_ru_crisis = await translate_insights(

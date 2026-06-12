@@ -12,7 +12,9 @@ model User {
   email     String   @unique
   role      Role     @default(CLIENT)
   client    ClientProfile?
-  createdAt DateTime @default(now())
+  createdAt DateTime @default(now()) @map("created_at")
+  
+  @@map("users")
 }
 
 enum Role {
@@ -21,28 +23,64 @@ enum Role {
 }
 
 model ClientProfile {
-  id             String        @id @default(uuid())
-  userId         String        @unique
-  user           User          @relation(fields: [userId], references: [id])
-  companyName    String
-  customKeywords String[]
-  reports        RadarReport[]
+  id              String         @id @default(uuid())
+  userId          String         @unique @map("user_id")
+  user            User           @relation(fields: [userId], references: [id])
+  companyName     String         @map("company_name")
+  customKeywords  String[]       @map("custom_keywords")
+  alertWebhookUrl String?        @map("alert_webhook_url")
+  reports         RadarReport[]
+  actionItems     ActionItem[]
+  createdAt       DateTime       @default(now()) @map("created_at")
+  
+  @@map("client_profiles")
 }
 
 model RadarReport {
-  id               String       @id @default(uuid())
-  clientId         String
-  client           ClientProfile @relation(fields: [clientId], references: [id])
-  reportDate       DateTime     @default(now())
-  executiveSummary String       @db.Text
-  chinaInsights    Json         // Array of MarketInsight objects
-  russiaInsights   Json         // Array of MarketInsight objects
-  crisisAlerts     Json         // Array of SocialPost objects
-  status           ReportStatus @default(COMPLETED)
+  id                   String         @id @default(uuid())
+  clientId             String         @map("client_id")
+  client               ClientProfile  @relation(fields: [clientId], references: [id])
+  reportDate           DateTime       @default(now()) @map("report_date")
+  executiveSummary     String         @db.Text @map("executive_summary")
+  
+  // Metrics for Dashboard Gauges & Charts
+  marketReadinessScore Int            @default(80) @map("market_readiness_score")
+  dailyMentions        Int            @default(0) @map("daily_mentions")
+  sentimentScore       Float          @default(0.5) @map("sentiment_score")
+  
+  chinaInsights        Json           @map("china_insights")
+  russiaInsights       Json           @map("russia_insights")
+  crisisAlerts         Json           @map("crisis_alerts")
+  status               ReportStatus   @default(COMPLETED)
+  actionItems          ActionItem[]
+  
+  @@map("radar_reports")
 }
 
 enum ReportStatus {
   PROCESSING
   COMPLETED
   FAILED
+}
+
+model ActionItem {
+  id          String        @id @default(uuid())
+  clientId    String        @map("client_id")
+  client      ClientProfile @relation(fields: [clientId], references: [id])
+  reportId    String?       @map("report_id")
+  report      RadarReport?  @relation(fields: [reportId], references: [id])
+  title       String
+  description String        @db.Text
+  status      ActionStatus  @default(NEW)
+  dueDate     DateTime?     @map("due_date")
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+  
+  @@map("action_items")
+}
+
+enum ActionStatus {
+  NEW
+  IN_PROGRESS
+  RESOLVED
 }

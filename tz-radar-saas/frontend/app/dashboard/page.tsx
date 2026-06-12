@@ -13,6 +13,8 @@ import {
 } from "lucide-react";
 import CrisisAlert from "@/components/CrisisAlert";
 import MarketPulse from "@/components/MarketPulse";
+import TrendChart from "@/components/TrendChart";
+import ReadinessGauge from "@/components/ReadinessGauge";
 import { triggerScan, getReport } from "@/lib/api";
 import type { RadarReport } from "@/lib/api";
 
@@ -207,8 +209,26 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* Crisis Alert Banner */}
-          {alertCount > 0 && <CrisisAlert alerts={report.crisisAlerts} />}
+          {/* ── Readiness Gauge + Crisis Alerts Row ── */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <ReadinessGauge score={report.marketReadinessScore || 85} />
+            <div className="lg:col-span-2">
+              {alertCount > 0 && <CrisisAlert alerts={report.crisisAlerts} />}
+            </div>
+          </div>
+
+          {/* ── Trend Chart (Full Width) ── */}
+          <TrendChart
+            data={[
+              { date: "Mon", mentions: 45, sentiment: 75 },
+              { date: "Tue", mentions: 52, sentiment: 80 },
+              { date: "Wed", mentions: 38, sentiment: 65 },
+              { date: "Thu", mentions: 61, sentiment: 85 },
+              { date: "Fri", mentions: 74, sentiment: 90 },
+              { date: "Sat", mentions: 55, sentiment: 78 },
+              { date: "Sun", mentions: 48, sentiment: 82 },
+            ]}
+          />
 
           {/* Executive Summary */}
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">

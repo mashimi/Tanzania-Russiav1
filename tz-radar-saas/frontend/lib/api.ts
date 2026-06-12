@@ -33,6 +33,9 @@ export interface RadarReport {
   russiaInsights: MarketInsight[];
   crisisAlerts: SocialPost[];
   reportDate: string | null;
+  marketReadinessScore: number;
+  dailyMentions: number;
+  sentimentScore: number;
 }
 
 export interface ScanTriggerResponse {
