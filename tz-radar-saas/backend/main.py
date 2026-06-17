@@ -19,6 +19,7 @@ load_dotenv(dotenv_path=Path(__file__).parent / ".env")
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from loguru import logger
 
 from models import (
@@ -27,6 +28,7 @@ from models import (
 )
 # Import the new unified, concurrent, AI-translated scanner
 from scanner import run_full_scan_and_translate
+from utils.pdf_export import generate_radar_pdf
 
 
 # ── In-memory store (swap for Prisma/PostgreSQL in production) ──
@@ -509,6 +511,33 @@ async def export_posts(
             "total": len(posts_to_export),
         }
 
+
+@app.get("/api/v1/radar/{job_id}/export/pdf")
+async def export_report_pdf(job_id: str):
+    """
+    Generates and downloads a PDF version of the completed radar report.
+    """
+    report = reports_store.get(job_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+    if report["status"] != "COMPLETED":
+        raise HTTPException(status_code=400, detail="Report is not completed yet")
+    
+    try:
+        # Generate PDF bytes
+        pdf_bytes = generate_radar_pdf(report)
+        
+        # Return as a downloadable file
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f"attachment; filename=TZ_Radar_Report_{job_id[:8]}.pdf"
+            }
+        )
+    except Exception as e:
+        logger.error(f"PDF export failed for {job_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to generate PDF")
 
 @app.get("/api/v1/analytics/trends")
 async def get_trend_analytics(days: int = 7):

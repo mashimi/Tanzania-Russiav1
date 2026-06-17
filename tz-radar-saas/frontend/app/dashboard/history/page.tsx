@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { 
   History, Calendar, Database, AlertTriangle, Eye, Loader2, ArrowRight,
-  TrendingUp, RefreshCw, BarChart2, CheckCircle2, XCircle
+  TrendingUp, RefreshCw, BarChart2, CheckCircle2, XCircle, Download
 } from "lucide-react";
 import { listReports, RadarReport } from "@/lib/api";
 
@@ -197,12 +197,22 @@ export default function HistoryPage() {
                       {report.crisisAlerts?.length || 0}
                     </td>
                     <td className="px-6 py-4.5 text-center whitespace-nowrap">
-                      <Link
-                        href={`/dashboard?jobId=${report.id}`}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-indigo-900/40 hover:bg-indigo-600 border border-indigo-800 text-indigo-300 hover:text-white rounded-lg transition-all"
-                      >
-                        <Eye className="w-3.5 h-3.5" /> Load Scan
-                      </Link>
+                      <div className="inline-flex items-center gap-2">
+                        <Link
+                          href={`/dashboard?jobId=${report.id}`}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-indigo-900/40 hover:bg-indigo-600 border border-indigo-800 text-indigo-300 hover:text-white rounded-lg transition-all"
+                        >
+                          <Eye className="w-3.5 h-3.5" /> Load Scan
+                        </Link>
+                        {report.status === "COMPLETED" && (
+                          <button
+                            onClick={() => window.open(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/v1/radar/${report.id}/export/pdf`, "_blank")}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-rose-950/40 hover:bg-rose-600 border border-rose-900 text-rose-300 hover:text-white rounded-lg transition-all"
+                          >
+                            <Download className="w-3.5 h-3.5" /> PDF
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
