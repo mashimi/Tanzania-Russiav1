@@ -29,6 +29,15 @@ openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 if not OPENAI_API_KEY:
     logger.warning("OPENAI_API_KEY not set. Translation will fallback to original text.")
 
+# ── 1. Define the No-API Platform Targets ──────────────────────────────
+SOCIAL_PLATFORMS = {
+    "TikTok": ["tiktok.com", "vm.tiktok.com"],
+    "Instagram": ["instagram.com", "instagr.am"],
+    "Facebook": ["facebook.com", "fb.com"],
+    "YouTube": ["youtube.com", "youtu.be"],
+    "Reddit": ["reddit.com"]
+}
+
 # -- Keyword Matrices & Forum Targets --
 FORUM_DOMAINS_RU = ["awd.ru", "tonkosti.ru", "forum.awd.ru", "pikabu.ru", "vk.com"]
 FORUM_DOMAINS_CN = ["xiaohongshu.com", "zhihu.com", "weibo.com", "bilibili.com"]
@@ -221,6 +230,72 @@ def _check_mcporter() -> bool:
         return "exa" in r.stdout.lower()
     except Exception:
         return False
+
+# ── 2. Exa Domain-Routing Helper ───────────────────────────────────────
+async def search_platform_via_exa(query: str, platform_name: str, domains: list, num_results: int = 3) -> list:
+    """
+    Uses Exa AI (via mcporter) to search specific platform domains.
+    Returns a list of standardized PostItem dicts.
+    """
+    domains_json = json.dumps(domains)
+    safe_query = query.replace('"', '\\"')
+    
+    cmd = [
+        "mcporter", "call",
+        f'exa.web_search_exa(query: "{safe_query}", numResults: {num_results}, includeDomains: {domains_json})'
+    ]
+    
+    posts = []
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, stderr = await proc.communicate()
+        
+        if proc.returncode == 0 and stdout:
+            output = stdout.decode('utf-8').strip()
+            
+            # Clean up mcporter markdown wrappers if present
+            if "```json" in output:
+                output = output.split("```json")[1].split("```")[0].strip()
+            elif output.startswith("```"):
+                output = output[3:].strip()
+            if output.endswith("```"):
+                output = output[:-3].strip()
+                
+            data = json.loads(output)
+            results = data.get("results", []) if isinstance(data, dict) else []
+            
+            for item in results:
+                posts.append({
+                    "id": item.get("url", item.get("id", "")),
+                    "platform": platform_name,
+                    "author": item.get("author", "Unknown User"),
+                    "author_followers": 0,
+                    "is_influencer": False,
+                    "content_original": item.get("text", "") or item.get("title", ""),
+                    "content_translated": "",
+                    "url": item.get("url", ""),
+                    "published_at": item.get("publishedDate", ""),
+                    "engagement": {"likes": 0, "comments": 0, "shares": 0, "views": 0, "total_score": 0.0},
+                    "sentiment": "neutral",
+                    "is_crisis": False,
+                    "topics": [],
+                    "language": "unknown",
+                    "screenshot_url": "",
+                    "archived": False,
+                    "flagged": False,
+                    "action_taken": None
+                })
+        else:
+            logger.warning(f"Exa search failed for {platform_name}: {stderr.decode('utf-8')}")
+            
+    except Exception as e:
+        logger.error(f"Exa platform search error ({platform_name}): {e}")
+        
+    return posts
 
 # -- Helper: Screenshot Capture --
 async def capture_screenshot(url: str) -> Optional[str]:
@@ -695,6 +770,27 @@ async def generate_executive_summary(china_insights: List[Dict], russia_insights
         logger.error(f"Failed to generate executive summary: {e}")
         return "Failed to generate AI summary. Please review raw insights."
 
+async def gather_social_platform_posts() -> List[Dict[str, Any]]:
+    """Concurrently scans TikTok, Instagram, FB, YT, and Reddit for top tourism keywords."""
+    TOP_TOURISM_KEYWORDS = [
+        "Tanzania tourism Zanzibar",
+        "Tanzania safari safety",
+        "Tanzania visa policy"
+    ]
+
+    tasks = []
+    for platform, domains in SOCIAL_PLATFORMS.items():
+        for kw in TOP_TOURISM_KEYWORDS:
+            tasks.append(search_platform_via_exa(kw, platform, domains, num_results=3))
+    
+    logger.info(f"🚀 Launching concurrent Exa scans for {len(tasks)} platform/keyword combinations...")
+    
+    results = await asyncio.gather(*tasks)
+    all_social_posts = [post for sublist in results for post in sublist]
+    logger.success(f"✅ Collected {len(all_social_posts)} posts from Social Platforms via Exa.")
+    
+    return all_social_posts
+
 async def run_full_scan_and_translate(client_id: str, custom_keywords: List[str]) -> Dict[str, Any]:
     logger.info(f"Starting full enhanced scan for client: {client_id}")
     
@@ -706,6 +802,15 @@ async def run_full_scan_and_translate(client_id: str, custom_keywords: List[str]
     
     all_posts = ru_posts + cn_posts + xhs_posts
     raw_post_count = len(all_posts)
+    
+    # Add social platform posts via Exa
+    social_posts = await gather_social_platform_posts()
+    all_posts.extend(social_posts)
+    raw_post_count += len(social_posts)
+    
+    # Merge social posts into existing market buckets for richer insights
+    ru_posts = ru_posts + [p for p in social_posts if p.get("language") in ("ru", "unknown")]
+    cn_posts = cn_posts + [p for p in social_posts if p.get("language") == "zh"]
     
     russia_insights = analyze_insights(ru_posts, "Russia")
     china_insights = analyze_insights(cn_posts + xhs_posts, "China")
