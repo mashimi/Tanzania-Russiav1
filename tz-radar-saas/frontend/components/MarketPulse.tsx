@@ -94,9 +94,9 @@ export default function MarketPulse({
                         )}
                       </div>
                       <p className="text-slate-700 leading-relaxed">
-                        {post.content_snippet.length > 180
-                          ? post.content_snippet.slice(0, 180) + "..."
-                          : post.content_snippet}
+                        {(post.content_snippet || "").length > 180
+                          ? (post.content_snippet || "").slice(0, 180) + "..."
+                          : post.content_snippet || "No content available"}
                       </p>
                     </div>
                   ))}

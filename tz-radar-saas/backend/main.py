@@ -72,12 +72,14 @@ async def trigger_scan(request: ScanRequest, background_tasks: BackgroundTasks):
     """
     job_id = str(uuid.uuid4())
 
-    # Create placeholder report
+    # Create placeholder report with progress tracking
     reports_store[job_id] = {
         "id": job_id,
         "clientId": request.client_id,
         "status": "PROCESSING",
-        "executiveSummary": "Initializing enhanced scan and translation pipeline...",
+        "progress_percent": 0,
+        "progress_stage": "Initializing scan pipeline...",
+        "executiveSummary": "",
         "chinaInsights": [],
         "russiaInsights": [],
         "crisisAlerts": [],
@@ -101,6 +103,9 @@ async def run_full_scan_background(job_id: str, client_id: str, custom_keywords:
     try:
         logger.info(f"▶️ Starting enhanced background scan for job {job_id}")
 
+        # Update progress: starting scan
+        reports_store[job_id].update({"progress_percent": 5, "progress_stage": "Scanning Russia market..."})
+
         # 1. Execute the new unified, concurrent, AI-translated scanner
         result = await run_full_scan_and_translate(client_id, custom_keywords)
 
@@ -109,6 +114,8 @@ async def run_full_scan_background(job_id: str, client_id: str, custom_keywords:
             "id": job_id,
             "clientId": client_id,
             "status": result["status"],
+            "progress_percent": 100,
+            "progress_stage": "Scan complete",
             "executiveSummary": result["executiveSummary"],
             "chinaInsights": result["chinaInsights"],
             "russiaInsights": result["russiaInsights"],
@@ -129,6 +136,8 @@ async def run_full_scan_background(job_id: str, client_id: str, custom_keywords:
             "id": job_id,
             "clientId": client_id,
             "status": "FAILED",
+            "progress_percent": 0,
+            "progress_stage": "Scan failed",
             "executiveSummary": f"Scan failed: {str(e)}",
             "chinaInsights": [],
             "russiaInsights": [],
@@ -196,91 +205,200 @@ async def handle_post_action(post_id: str, action: dict):
     return {"status": "success", "action": action_type, "post_id": post_id}
 
 
+@app.get("/api/v1/posts/feed")
+async def get_intelligence_feed(
+    job_id: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
+):
+    """
+    Get live intelligence feed with full post details.
+    Returns posts with engagement metrics, translations, and author info.
+    """
+    if job_id:
+        report = reports_store.get(job_id)
+        if not report:
+            raise HTTPException(status_code=404, detail="Report not found")
+        
+        all_posts = []
+        for insight in report.get("chinaInsights", []):
+            all_posts.extend(insight.get("posts", []))
+        for insight in report.get("russiaInsights", []):
+            all_posts.extend(insight.get("posts", []))
+        all_posts.extend(report.get("crisisAlerts", []))
+        
+        # Deduplicate by url if present
+        seen_urls = set()
+        deduped = []
+        for p in all_posts:
+            url = p.get("url")
+            if url:
+                if url not in seen_urls:
+                    seen_urls.add(url)
+                    deduped.append(p)
+            else:
+                deduped.append(p)
+        
+        deduped.sort(key=lambda x: x.get("engagement", 0) if isinstance(x.get("engagement"), (int, float)) else 0, reverse=True)
+        paginated_posts = deduped[offset:offset + limit]
+        
+        return {
+            "posts": paginated_posts,
+            "total": len(deduped),
+            "has_more": offset + limit < len(deduped),
+        }
+    
+    all_posts = []
+    for report in reports_store.values():
+        if report.get("status") != "COMPLETED":
+            continue
+        
+        for insight in report.get("chinaInsights", []):
+            for post in insight.get("posts", []):
+                all_posts.append({**post, "report_id": report["id"], "report_date": report.get("reportDate")})
+        for insight in report.get("russiaInsights", []):
+            for post in insight.get("posts", []):
+                all_posts.append({**post, "report_id": report["id"], "report_date": report.get("reportDate")})
+        for alert in report.get("crisisAlerts", []):
+            all_posts.append({**alert, "report_id": report["id"], "report_date": report.get("reportDate")})
+    
+    # Deduplicate
+    seen_urls = set()
+    deduped = []
+    for p in all_posts:
+        url = p.get("url")
+        if url:
+            if url not in seen_urls:
+                seen_urls.add(url)
+                deduped.append(p)
+        else:
+            deduped.append(p)
+            
+    deduped.sort(key=lambda x: x.get("engagement", 0) if isinstance(x.get("engagement"), (int, float)) else 0, reverse=True)
+    paginated_posts = deduped[offset:offset + limit]
+    
+    return {
+        "posts": paginated_posts,
+        "total": len(deduped),
+        "has_more": offset + limit < len(deduped),
+    }
+
+
 @app.get("/api/v1/posts/search")
 async def search_posts(
     query: str = "",
     time_range: str = "24h",
     platform: str = "all",
     min_engagement: int = 0,
-    page: int = 1,
-    limit: int = 20,
+    is_crisis: Optional[bool] = None,
+    is_influencer: Optional[bool] = None,
+    limit: int = 50,
+    offset: int = 0,
 ):
-    """Search posts with filters across all stored reports."""
-    all_posts = []
+    """
+    Search posts with advanced filters across completed reports.
+    """
+    matching_posts = []
+    seen_urls = set()
+    
     for report in reports_store.values():
-        for alert in report.get("crisisAlerts", []):
-            all_posts.append(alert)
-        for insight_list in [report.get("chinaInsights", []), report.get("russiaInsights", [])]:
-            for insight in insight_list:
-                all_posts.extend(insight.get("posts", []))
-    
-    # Apply filters
-    filtered = all_posts
-    if query:
-        q = query.lower()
-        filtered = [p for p in filtered if q in p.get("content_snippet", "").lower() or q in p.get("author", "").lower()]
-    if platform != "all":
-        filtered = [p for p in filtered if platform.lower() in p.get("platform", "").lower()]
-    
-    # Sort by engagement desc
-    filtered.sort(key=lambda p: p.get("engagement", 0) if isinstance(p.get("engagement"), (int, float)) else 0, reverse=True)
-    
-    # Paginate
-    start = (page - 1) * limit
-    paginated = filtered[start:start + limit]
+        if report["status"] != "COMPLETED":
+            continue
+            
+        all_posts = (
+            [p for insight in report["chinaInsights"] for p in insight.get("posts", [])] +
+            [p for insight in report["russiaInsights"] for p in insight.get("posts", [])] +
+            report.get("crisisAlerts", [])
+        )
+        
+        for post in all_posts:
+            url = post.get("url")
+            if url:
+                if url in seen_urls:
+                    continue
+                seen_urls.add(url)
+                
+            # Query filter
+            if query:
+                content = (post.get("content_translated") or post.get("content_original") or "").lower()
+                author = (post.get("author") or "").lower()
+                if query.lower() not in content and query.lower() not in author:
+                    continue
+                    
+            # Platform filter
+            if platform != "all" and platform.lower() not in post.get("platform", "").lower():
+                continue
+                
+            # Engagement filter
+            if post.get("engagement", 0) < min_engagement:
+                continue
+                
+            # Crisis filter
+            if is_crisis is not None and post.get("is_crisis", False) != is_crisis:
+                continue
+                
+            # Influencer filter
+            if is_influencer is not None and post.get("is_influencer", False) != is_influencer:
+                continue
+                
+            matching_posts.append({
+                **post,
+                "report_id": report["id"],
+                "report_date": report.get("reportDate"),
+            })
+            
+    matching_posts.sort(key=lambda x: x.get("engagement", 0) if isinstance(x.get("engagement"), (int, float)) else 0, reverse=True)
+    paginated = matching_posts[offset:offset + limit]
     
     return {
         "posts": paginated,
-        "total": len(filtered),
-        "page": page,
-        "limit": limit,
+        "total": len(matching_posts),
+        "query": query,
+        "filters": {
+            "time_range": time_range,
+            "platform": platform,
+            "min_engagement": min_engagement,
+            "is_crisis": is_crisis,
+            "is_influencer": is_influencer,
+        },
+        "has_more": offset + limit < len(matching_posts),
     }
 
 
-@app.post("/api/v1/posts/{post_id}/screenshot")
-async def capture_post_screenshot(post_id: str):
-    """Placeholder: Capture screenshot of a post URL."""
-    found_post = None
+@app.get("/api/v1/posts/{post_id}")
+async def get_post_details(post_id: str):
+    """
+    Get detailed information about a specific post by ID or URL.
+    """
     for report in reports_store.values():
-        for alert in report.get("crisisAlerts", []):
-            if alert.get("id") == post_id:
-                found_post = alert
-                break
-        for insight_list in [report.get("chinaInsights", []), report.get("russiaInsights", [])]:
-            for insight in insight_list:
-                for post in insight.get("posts", []):
-                    if post.get("id") == post_id:
-                        found_post = post
-                        break
-    
-    if not found_post:
-        raise HTTPException(status_code=404, detail="Post not found")
-    
-    # In production, use Playwright to capture screenshot
-    screenshot_url = f"https://screenshot.tz-radar.internal/{post_id}"
-    
-    return {"screenshot_url": found_post.get("screenshot_url", screenshot_url)}
-
-
-@app.get("/api/v1/posts/influencers")
-async def list_influencers(min_followers: int = 10000, limit: int = 10):
-    """List influencers detected across scans."""
-    influencers = []
-    seen_authors = set()
-    for report in reports_store.values():
-        for alert in report.get("crisisAlerts", []):
-            author = alert.get("author", "")
-            if author and author not in seen_authors:
-                seen_authors.add(author)
-                influencers.append(alert)
-    return {"influencers": influencers[:limit], "total": len(influencers)}
+        if report.get("status") != "COMPLETED":
+            continue
+            
+        all_posts = (
+            [p for insight in report["chinaInsights"] for p in insight.get("posts", [])] +
+            [p for insight in report["russiaInsights"] for p in insight.get("posts", [])] +
+            report.get("crisisAlerts", [])
+        )
+        
+        for post in all_posts:
+            if post.get("url") == post_id or post.get("id") == post_id:
+                return {
+                    "post": post,
+                    "report_id": report["id"],
+                    "report_date": report.get("reportDate"),
+                }
+                
+    raise HTTPException(status_code=404, detail="Post not found")
 
 
 @app.post("/api/v1/posts/action")
 async def handle_post_action_v2(request: PostActionRequest):
-    """Handle user actions on posts: respond, flag, investigate, archive."""
+    """
+    Handle user actions on posts: respond, flag, investigate, archive.
+    """
     logger.info(f"Action '{request.action_type}' on post: {request.post_url}")
     
+    # Store action in database (in-memory for now)
     action_record = {
         "post_url": request.post_url,
         "action_type": request.action_type,
@@ -289,27 +407,42 @@ async def handle_post_action_v2(request: PostActionRequest):
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
     
-    if request.action_type == "respond":
-        logger.info(f"Response action triggered for {request.post_url}")
-    elif request.action_type == "flag":
-        logger.warning(f"Post flagged: {request.post_url}")
-    elif request.action_type == "investigate":
-        logger.info(f"Investigation started for {request.post_url}")
-    
-    return {"status": "success", "action": request.action_type, "timestamp": action_record["timestamp"]}
+    # In production, save to database. Update the post action in report store
+    for report in reports_store.values():
+        all_posts = (
+            [p for insight in report.get("chinaInsights", []) for p in insight.get("posts", [])] +
+            [p for insight in report.get("russiaInsights", []) for p in insight.get("posts", [])] +
+            report.get("crisisAlerts", [])
+        )
+        for post in all_posts:
+            if post.get("url") == request.post_url:
+                post["action_taken"] = request.action_type
+                post["action_taken_at"] = action_record["timestamp"]
+                if request.action_type == "flag":
+                    post["flagged"] = True
+                elif request.action_type == "archive":
+                    post["archived"] = True
+                    
+    return {
+        "status": "success", 
+        "action": request.action_type, 
+        "timestamp": action_record["timestamp"]
+    }
 
 
-@app.get("/api/v1/posts/search/v2")
-async def search_posts_v2(
-    query: str = "",
-    time_range: str = "24h",
-    platform: str = "all",
-    min_engagement: int = 0,
-    is_crisis: Optional[bool] = None,
-    is_influencer: Optional[bool] = None,
+@app.post("/api/v1/posts/export")
+async def export_posts(
+    format: str = "csv",
+    post_urls: Optional[List[str]] = None,
 ):
-    """Search posts with filters across completed reports."""
-    matching_posts = []
+    """
+    Export selected posts in CSV or JSON format.
+    """
+    import csv
+    import io
+    
+    posts_to_export = []
+    seen_urls = set()
     
     for report in reports_store.values():
         if report["status"] != "COMPLETED":
@@ -317,57 +450,64 @@ async def search_posts_v2(
             
         all_posts = (
             [p for insight in report["chinaInsights"] for p in insight.get("posts", [])] +
-            [p for insight in report["russiaInsights"] for p in insight.get("posts", [])]
+            [p for insight in report["russiaInsights"] for p in insight.get("posts", [])] +
+            report.get("crisisAlerts", [])
         )
         
-        for post in all_posts:
-            if query:
-                content = post.get("content_translated") or post.get("content_original", post.get("content_snippet", ""))
-                if query.lower() not in content.lower():
+        for p in all_posts:
+            url = p.get("url")
+            if url:
+                if url in seen_urls:
                     continue
-            if platform != "all" and platform.lower() not in post.get("platform", "").lower():
-                continue
-            if post.get("engagement", 0) < min_engagement:
-                continue
-            if is_crisis is not None and post.get("is_crisis", False) != is_crisis:
-                continue
-            if is_influencer is not None and post.get("is_influencer", False) != is_influencer:
-                continue
-            matching_posts.append(post)
-    
-    return {
-        "posts": matching_posts,
-        "total": len(matching_posts),
-        "query": query,
-        "filters": {"time_range": time_range, "platform": platform, "min_engagement": min_engagement}
-    }
-
-
-@app.post("/api/v1/posts/export")
-async def export_posts(
-    format: str = "json",
-    post_urls: Optional[List[str]] = None,
-):
-    """Export selected posts in JSON format."""
-    posts_to_export = []
-    
-    for report in reports_store.values():
-        if report["status"] != "COMPLETED":
-            continue
-        all_posts = (
-            [p for insight in report["chinaInsights"] for p in insight.get("posts", [])] +
-            [p for insight in report["russiaInsights"] for p in insight.get("posts", [])]
-        )
-        if post_urls:
-            posts_to_export.extend([p for p in all_posts if p.get("url") in post_urls])
-        else:
-            posts_to_export.extend(all_posts)
-    
-    return {
-        "posts": posts_to_export,
-        "exported_at": datetime.now(timezone.utc).isoformat(),
-        "total": len(posts_to_export),
-    }
+                seen_urls.add(url)
+                
+            if post_urls:
+                if url in post_urls:
+                    posts_to_export.append(p)
+            else:
+                posts_to_export.append(p)
+                
+    if format == "json":
+        return {
+            "posts": posts_to_export,
+            "exported_at": datetime.now(timezone.utc).isoformat(),
+            "total": len(posts_to_export),
+        }
+    else:
+        # CSV format
+        output = io.StringIO()
+        if posts_to_export:
+            fieldnames = [
+                "platform", "author", "author_followers", "is_influencer",
+                "content_original", "content_translated",
+                "engagement", "is_crisis", "url", "published_at", "topics", "language"
+            ]
+            writer = csv.DictWriter(output, fieldnames=fieldnames, extrasaction='ignore')
+            writer.writeheader()
+            
+            # Prepare rows to avoid dict writing issues with nested properties
+            rows = []
+            for p in posts_to_export:
+                rows.append({
+                    "platform": p.get("platform", ""),
+                    "author": p.get("author", ""),
+                    "author_followers": p.get("author_followers", 0),
+                    "is_influencer": p.get("is_influencer", False),
+                    "content_original": p.get("content_original", p.get("content_snippet", ""))[:1000],
+                    "content_translated": p.get("content_translated", "")[:1000],
+                    "engagement": p.get("engagement", 0),
+                    "is_crisis": p.get("is_crisis", False),
+                    "url": p.get("url", ""),
+                    "published_at": p.get("published_at", ""),
+                    "topics": ",".join(p.get("topics", [])),
+                    "language": p.get("language", ""),
+                })
+            writer.writerows(rows)
+            
+        return {
+            "csv_data": output.getvalue(),
+            "total": len(posts_to_export),
+        }
 
 
 @app.get("/api/v1/analytics/trends")

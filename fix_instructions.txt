@@ -1,41 +1,97 @@
-1. Fix Pylance FastAPI missing-import diagnostics
-- Specific goal/outcome: Resolve `reportMissingImports` diagnostics for `fastapi` and `fastapi.middleware.cors` in `tz-radar-saas/backend/main.py`.
-- Constraints or requirements:
-  - `tz-radar-saas/backend/requirements.txt` already declares `fastapi>=0.109.0`, so the backend code does not need import changes.
-  - FastAPI is installed for the discovered Python 3.10 interpreter at `C:\Users\Lenovo\AppData\Local\Programs\Python\Python310\python.exe`.
-  - Pylance was not resolving FastAPI because the workspace did not have an explicit Python interpreter configuration.
-- Expected behavior:
-  - Pylance uses Python 3.10 for the workspace and resolves `fastapi` and `fastapi.middleware.cors`.
-  - Pylance can also resolve local backend imports such as `models` and `scanner` via `tz-radar-saas/backend`.
-- Files to modify:
-  - `tz-radar-saas/backend/main.py`: no code changes required.
-  - `tz-radar-saas/backend/requirements.txt`: no dependency changes required.
-  - Added `.vscode/settings.json` with:
-    - `python.defaultInterpreterPath` pointing to Python 3.10.
-    - `python.analysis.extraPaths` including `tz-radar-saas/backend`.
-- Follow-up if diagnostics remain:
-  - In VS Code, run `Python: Select Interpreter` and choose `C:\Users\Lenovo\AppData\Local\Programs\Python\Python310\python.exe`.
-  - Reload the VS Code window.
-  - If a different interpreter is intentionally selected, install backend requirements into that interpreter with `python -m pip install -r tz-radar-saas/backend/requirements.txt`.
+# TZ Tourism Radar SaaS - Startup & Issue Fix Guide
 
-2. Fix mcporter timeout blocking China scans
-- Specific goal/outcome: Prevent the China scan from returning empty results when `mcporter config list` times out or does not report Exa configuration.
-- Constraints or requirements:
-  - The previous scanner treated the `mcporter config list` preflight as fatal. If it failed, `scan_china_market()` returned `[]` before attempting `mcporter call`.
-  - Direct `mcporter call exa.web_search_exa(...)` can still work even when the config preflight is slow or incomplete.
-- Expected behavior:
-  - `_check_mcporter()` is cached and treated as a best-effort preflight only.
-  - China and Russia scans continue to attempt direct Exa searches even if the preflight fails.
-  - Individual Exa keyword searches use Windows `.cmd` shell execution and a 45-second timeout, so one slow keyword does not hang the whole scan.
+## ✅ RESOLVED: Application Startup Issues
 
-3. Upgrade keyword coverage with categorized matrices
-- Specific goal/outcome: Expand from 10 flat keywords per market to ~20+ keywords organized by category (tourism, investment, logistics, luxury).
-- Changes in `tz-radar-saas/backend/scanner.py`:
-  - Replaced `KEYWORDS_RU` and `KEYWORDS_CN` flat lists with `KEYWORD_MATRIX_RU` and `KEYWORD_MATRIX_CN` dicts.
-  - Added `get_all_keywords()` helper to flatten and deduplicate.
-  - Updated `scan_russia_market()` and `scan_china_market()` to use the matrix with `num_results=3` and `asyncio.sleep(0.3)`.
-- Verification:
-  - Python compile passed.
-  - Keyword counts: RU=19 keywords across 4 categories, CN=24 keywords across 4 categories.
-  - Backend health check: `{"status":"ok","service":"tz-radar-api","version":"2.0.0"}`.
-  - Frontend dashboard: `HTTP 200 OK`.
+### Problem: Path Errors When Starting Backend
+**Error:** `cd tz-radar-saas/backend` failed when run from `tz-radar-saas/frontend` because it created invalid path `C:\Tanzania-Russia\tz-radar-saas\frontend\tz-radar-saas\backend`
+
+**Solution:** Created startup scripts that handle directory changes automatically:
+- `start_backend.bat` - Starts FastAPI backend on port 8000
+- `start_frontend.bat` - Starts Next.js frontend on port 3000
+
+### How to Start the Application
+**Option 1 (Recommended):** Double-click the batch files in File Explorer
+- Run `start_backend.bat` first (from project root)
+- Run `start_frontend.bat` second (from project root)
+
+**Option 2:** From PowerShell in project root (C:\Tanzania-Russia):
+```powershell
+.\start_backend.bat
+```
+Then in another terminal:
+```powershell
+.\start_frontend.bat
+```
+
+**Access the Application:**
+- Frontend: http://localhost:3000
+- Backend API: http://localhost:8000
+- API Health: http://localhost:8000/health
+
+---
+
+## ⚠️ ACTIVE ISSUES REQUIRING CONFIGURATION
+
+### 1. OpenAI API Quota Exceeded
+**Error:** `Error code: 429 - {'error': {'message': 'You exceeded your current quota', 'type': 'insufficient_quota'}}`
+
+**Impact:** AI translation and executive summary generation fail
+
+**Solution:**
+1. Go to https://platform.openai.com/account/billing
+2. Add payment method or purchase credits
+3. Check API key in `tz-radar-saas/backend/.env`
+
+### 2. Exa API Rate Limit Errors
+**Errors:**
+- `HTTP 429` - Rate limit exceeded
+- `HTTP 405` - Method not allowed
+- `Connect Timeout Error` - Service unavailable
+
+**Impact:** Web search functionality limited
+
+**Solution:**
+1. Check Exa API key in `tz-radar-saas/backend/.env`
+2. Verify API subscription status at https://exa.ai
+3. Implement exponential backoff in scanner code (line ~399-407)
+4. Consider caching search results to reduce API calls
+
+---
+
+## 📁 FILE STRUCTURE
+
+```
+C:\Tanzania-Russia\
+├── start_backend.bat          ← NEW: Backend startup script
+├── start_frontend.bat         ← NEW: Frontend startup script
+├── fix_instructions.txt       ← NEW: This file
+├── tz-radar-saas/
+│   ├── backend/
+│   │   ├── main.py           ← FastAPI application
+│   │   ├── scanner.py        ← Enhanced scanner with Exa + OpenAI
+│   │   ├── models.py         ← Pydantic models
+│   │   └── .env              ← API keys (configure this!)
+│   └── frontend/
+│       ├── package.json      ← Next.js app
+│       └── .env.local        ← Frontend config
+```
+
+---
+
+## 🔧 CONFIGURATION CHECKLIST
+
+- [ ] OpenAI API key set in `tz-radar-saas/backend/.env`
+- [ ] OpenAI account has available credits
+- [ ] Exa API key set in `tz-radar-saas/backend/.env`
+- [ ] Exa subscription active
+- [ ] Frontend can reach backend at http://localhost:8000
+- [ ] Backend CORS allows http://localhost:3000 (already configured)
+
+---
+
+## 🚀 APPLICATION STATUS
+
+**Backend:** ✅ Running (PID 15752, port 8000)
+**Frontend:** ✅ Running (port 3000)
+**Last Scan:** 129 posts collected, 4-5 crisis alerts detected
+**Issue:** Translation & summary generation blocked by OpenAI quota

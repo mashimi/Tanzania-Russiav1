@@ -7,7 +7,12 @@ export const api = axios.create({
   },
 });
 
-// ── TypeScript types matching the backend RadarReportResponse ──
+export interface EngagementDetails {
+  likes: number;
+  comments: number;
+  shares: number;
+  views: number;
+}
 
 export interface SocialPost {
   platform: string;
@@ -15,6 +20,20 @@ export interface SocialPost {
   content_snippet: string;
   engagement: number;
   is_crisis: boolean;
+  author_followers?: number;
+  is_influencer?: boolean;
+  content_original?: string;
+  content_translated?: string;
+  url?: string;
+  published_at?: string;
+  screenshot_url?: string | null;
+  topics?: string[];
+  language?: string;
+  trend_percentage?: number;
+  action_taken?: string | null;
+  flagged?: boolean;
+  archived?: boolean;
+  engagement_details?: EngagementDetails;
 }
 
 export interface MarketInsight {
@@ -33,9 +52,12 @@ export interface RadarReport {
   russiaInsights: MarketInsight[];
   crisisAlerts: SocialPost[];
   reportDate: string | null;
-  marketReadinessScore: number;
-  dailyMentions: number;
-  sentimentScore: number;
+  marketReadinessScore?: number;
+  dailyMentions?: number;
+  sentimentScore?: number;
+  raw_post_count?: number;
+  progress_percent?: number;
+  progress_stage?: string;
 }
 
 export interface ScanTriggerResponse {

@@ -42,9 +42,9 @@ export default function CrisisAlert({ alerts }: CrisisAlertProps) {
                   </span>
                 </div>
                 <p className="text-slate-700 text-xs leading-relaxed">
-                  {alert.content_snippet.length > 150
-                    ? alert.content_snippet.slice(0, 150) + "..."
-                    : alert.content_snippet}
+                  {(alert.content_snippet || "").length > 150
+                    ? (alert.content_snippet || "").slice(0, 150) + "..."
+                    : alert.content_snippet || "No content available"}
                 </p>
               </div>
             ))}
